@@ -1,6 +1,6 @@
 # leetcode
 
-Leetcode solutions
+Leetcode problems' solutions
 
 `init.sh` is a shell script that creates a new git branch, a directory with a two files inside: for the problem itself and for the tests
 
