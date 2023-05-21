@@ -35,8 +35,10 @@ if [ $lang == "py" ]; then
     echo "File $file_path already exists"
     exit 1
   else
-    echo "class Solution:
-    def main(self):
+    echo "from typing import List
+
+class Solution:
+    def main(self, args: List[int]) -> int:
         pass" >$file_path
   fi
 
