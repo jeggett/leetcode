@@ -49,6 +49,7 @@ class Solution:
   else
     echo "from $p_name import Solution
 
+
 solution = Solution()
 
 
