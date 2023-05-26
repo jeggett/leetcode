@@ -37,6 +37,7 @@ if [ $lang == "py" ]; then
   else
     echo "from typing import List
 
+
 class Solution:
     def main(self, args: List[int]) -> int:
         pass" >$file_path
@@ -54,7 +55,7 @@ solution = Solution()
 
 
 def test_$p_name():
-    assert solution.main() == 0" >$test_file_path
+    assert solution.main() ==" >$test_file_path
     echo "Success!"
   fi
 
