@@ -2,11 +2,12 @@
 
 # take language from the first argument
 lang=$1
-if [ $lang != "py" || $lang != "ts"] then
+shift # remove the first argument
+
+if [[ $lang != "py" && $lang != "ts" ]]; then
   echo "Unknown language '$lang'"
   exit 1
 fi
-shift # remove the first argument
 
 # join the remaining arguments with hyphens, remove dots, convert to lower case
 p_name=p-$(echo "$@" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
