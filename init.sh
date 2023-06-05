@@ -2,6 +2,10 @@
 
 # take language from the first argument
 lang=$1
+if [ $lang != "py" || $lang != "ts"] then
+  echo "Unknown language '$lang'"
+  exit 1
+fi
 shift # remove the first argument
 
 # join the remaining arguments with hyphens, remove dots, convert to lower case
@@ -39,8 +43,8 @@ if [ $lang == "py" ]; then
 
 
 class Solution:
-    def main(self, args: List[int]) -> int:
-        pass" >$file_path
+    
+" >$file_path
   fi
 
   test_file_path=$dir_path/test_$p_name.py
