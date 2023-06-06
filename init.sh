@@ -11,6 +11,8 @@ fi
 
 # join the remaining arguments with hyphens, remove dots, convert to lower case
 p_name=p-$(echo "$@" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
+# pad numbers with zeroes
+p_name=$(echo "$p_name" | sed -r ":r;s/\b[0-9]{1,3}\b/0&/g;tr")
 
 git fetch origin main:main
 
@@ -22,8 +24,7 @@ else
   git checkout -b $branch_name main
 fi
 
-# replace - with _
-p_name=${p_name//-/_}
+p_name=${p_name//-/_} # replace all the - with _
 
 if [ $lang == "py" ]; then
 
