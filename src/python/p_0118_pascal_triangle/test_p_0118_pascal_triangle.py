@@ -1,4 +1,4 @@
-from p_118_pascal_triangle import Solution
+from p_0118_pascal_triangle import Solution
 
 
 solution = Solution()

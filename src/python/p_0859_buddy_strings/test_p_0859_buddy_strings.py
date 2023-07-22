@@ -1,4 +1,4 @@
-from p_859_buddy_strings import Solution
+from p_0859_buddy_strings import Solution
 
 solution = Solution()
 

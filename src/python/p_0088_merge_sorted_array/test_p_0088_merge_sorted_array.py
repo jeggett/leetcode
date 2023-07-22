@@ -1,4 +1,4 @@
-from p_88_merge_sorted_array import Solution
+from p_0088_merge_sorted_array import Solution
 
 
 solution = Solution()
