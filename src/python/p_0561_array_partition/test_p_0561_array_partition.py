@@ -1,4 +1,4 @@
-from p_561_array_partition import Solution
+from p_0561_array_partition import Solution
 
 
 solution = Solution()

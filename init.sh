@@ -45,8 +45,7 @@ if [ $lang == "py" ]; then
 
 
 class Solution:
-    
-" >$file_path
+    " >$file_path
   fi
 
   test_file_path=$dir_path/test_$p_name.py
