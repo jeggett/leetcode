@@ -1,0 +1,27 @@
+{
+  // Use IntelliSense to learn about possible attributes.
+  // Hover to view descriptions of existing attributes.
+  // For more information, visit: [1](https://code.visualstudio.com/docs/typescript/typescript-debugging)
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // This configuration will run the current TypeScript file with Deno
+      "name": "Run TypeScript with Deno",
+      "type": "node",
+      "request": "launch",
+      "runtimeExecutable": "deno",
+      "runtimeArgs": ["run"],
+      "program": "${file}",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      // This configuration will run the current Python file with Python
+      "name": "Run Python with Python",
+      "type": "python",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ]
+}
