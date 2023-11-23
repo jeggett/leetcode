@@ -45,6 +45,7 @@ if [ $lang == "py" ]; then
 
 
 class Solution:
+    ''' time: O(n), space: O(n) '''
     " >$file_path
   fi
 
@@ -79,9 +80,9 @@ elif [ $lang == "ts" ]; then
     echo "File $file_path already exists"
     exit 1
   else
-    echo "export function $p_name_camel() {
-  // write your code here
-  return undefined;
+    echo "/* time: O(n), space: O(n) */
+    export function $p_name_camel
+  return
 }" >$file_path
     echo "Success!"
   fi
@@ -95,7 +96,10 @@ elif [ $lang == "ts" ]; then
     echo "import { $p_name_camel } from \"./$p_name\";
 
 test(\"problem $p_number\", () => {
-  expect($p_name_camel(0)).toEqual(1);
+  expect($p_name_camel()).toEqual();
+  expect($p_name_camel()).toEqual();
+  expect($p_name_camel()).toEqual();
+  expect($p_name_camel()).toEqual();
 });" >$test_file_path
     echo "Success!"
   fi
