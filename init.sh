@@ -81,7 +81,7 @@ elif [ $lang == "ts" ]; then
     exit 1
   else
     echo "/* time: O(n), space: O(n) */
-    export function $p_name_camel
+export function $p_name_camel
   return
 }" >$file_path
     echo "Success!"
