@@ -1,18 +1,17 @@
 /* time: O(n), space: O(1) */
 export function findDuplicate(nums: number[]): number {
-  let i = 0;
-  while (i < nums.length) {
-    const j = nums[i] - 1;
-    // if true, then element is not on the correct place
-    if (i !== j) {
-      if (nums[i] === nums[j]) {
-        return nums[i];
-      }
-      [nums[i], nums[j]] = [nums[j], nums[i]];
-    } else {
-      i++;
-    }
-  }
+  let [slow, fast, slowFromStart] = [0, 0, 0];
 
-  return 0;
+  do {
+    slow = nums[slow];
+    fast = nums[fast];
+    fast = nums[fast];
+  } while (slow !== fast); // found the meeting point
+
+  do {
+    slow = nums[slow];
+    slowFromStart = nums[slowFromStart];
+  } while (slow !== slowFromStart);
+
+  return slow;
 }
