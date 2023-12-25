@@ -1,0 +1,4 @@
+"{*.js,*.ts,*.tsx,*.jsx}":
+  - "eslint --fix"
+  - "prettier --list-different"
+"*.md": "prettier --list-different"
