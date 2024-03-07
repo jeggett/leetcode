@@ -2,11 +2,7 @@
   "[python]": {
     "editor.defaultFormatter": "ms-python.black-formatter"
   },
-  "python.formatting.provider": "none",
   "python.testing.pytestArgs": ["src"],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,
-  "deno.enable": false,
-  "deno.lint": false,
-  "deno.unstable": false
 }
