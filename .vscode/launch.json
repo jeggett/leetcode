@@ -5,19 +5,17 @@
   "version": "0.2.0",
   "configurations": [
     {
-      // This configuration will run the current TypeScript file with Deno
-      "name": "Run TypeScript with Deno",
+      "name": "TypeScript",
       "type": "node",
       "request": "launch",
-      "runtimeExecutable": "deno",
-      "runtimeArgs": ["run"],
       "program": "${file}",
-      "cwd": "${workspaceFolder}"
+      "preLaunchTask": "tsc: build - tsconfig.json",
+      "outFiles": ["${workspaceFolder}/build/**/*.js"]
     },
     {
       // This configuration will run the current Python file with Python
-      "name": "Run Python with Python",
-      "type": "python",
+      "name": "Python",
+      "type": "debugpy",
       "request": "launch",
       "program": "${file}",
       "console": "integratedTerminal",
