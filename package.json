@@ -4,7 +4,7 @@
   "description": "Repo created to track progress on leetcode",
   "scripts": {
     "test": "NODE_OPTIONS=--experimental-vm-modules jest",
-    "prepare": "husky install"
+    "prepare": "husky"
   },
   "repository": {
     "type": "git",
@@ -30,12 +30,12 @@
   },
   "homepage": "https://github.com/jeggett/leetcode#readme",
   "devDependencies": {
-    "@babel/core": "^7.24.0",
-    "@babel/preset-env": "^7.24.0",
-    "@babel/preset-typescript": "^7.23.3",
+    "@babel/core": "^7.24.4",
+    "@babel/preset-env": "^7.24.4",
+    "@babel/preset-typescript": "^7.24.1",
     "@types/jest": "^29.5.12",
-    "@typescript-eslint/eslint-plugin": "^7.1.1",
-    "@typescript-eslint/parser": "^7.1.1",
+    "@typescript-eslint/eslint-plugin": "^7.5.0",
+    "@typescript-eslint/parser": "^7.5.0",
     "babel-jest": "^29.7.0",
     "eslint": "^8.57.0",
     "husky": "^9.0.11",
@@ -43,6 +43,7 @@
     "jest-environment-node": "^29.7.0",
     "lint-staged": "^15.2.2",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.2"
-  }
+    "typescript": "^5.4.3"
+  },
+  "packageManager": "pnpm@8.15.6+sha256.01c01eeb990e379b31ef19c03e9d06a14afa5250b82e81303f88721c99ff2e6f"
 }
