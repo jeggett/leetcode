@@ -1,5 +1,6 @@
 {
   "name": "leetcode",
+  "type": "module",
   "version": "1.0.0",
   "description": "Repo created to track progress on leetcode",
   "scripts": {
@@ -34,8 +35,8 @@
     "@babel/preset-env": "^7.24.4",
     "@babel/preset-typescript": "^7.24.1",
     "@types/jest": "^29.5.12",
-    "@typescript-eslint/eslint-plugin": "^7.5.0",
-    "@typescript-eslint/parser": "^7.5.0",
+    "@typescript-eslint/eslint-plugin": "^7.7.0",
+    "@typescript-eslint/parser": "^7.7.0",
     "babel-jest": "^29.7.0",
     "eslint": "^8.57.0",
     "husky": "^9.0.11",
@@ -43,7 +44,6 @@
     "jest-environment-node": "^29.7.0",
     "lint-staged": "^15.2.2",
     "prettier": "^3.2.5",
-    "typescript": "^5.4.3"
-  },
-  "packageManager": "pnpm@8.15.6+sha256.01c01eeb990e379b31ef19c03e9d06a14afa5250b82e81303f88721c99ff2e6f"
+    "typescript": "^5.4.5"
+  }
 }
