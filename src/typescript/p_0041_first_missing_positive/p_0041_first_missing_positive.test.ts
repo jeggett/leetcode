@@ -1,4 +1,4 @@
-import { firstMissingPositive } from "./p_0041_first_missing_positive";
+import { firstMissingPositive } from "./p_0041_first_missing_positive.js";
 
 test("problem 0041", () => {
   expect(firstMissingPositive([3, 4, -1, 1])).toEqual(2);

@@ -1,4 +1,4 @@
-import { containsDuplicate } from "./p_0217_contains_duplicate";
+import { containsDuplicate } from "./p_0217_contains_duplicate.js";
 
 test("problem 0217", () => {
   expect(containsDuplicate([1, 2, 3, 2])).toEqual(true);

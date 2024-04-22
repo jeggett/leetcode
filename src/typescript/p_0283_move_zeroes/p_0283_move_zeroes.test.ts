@@ -1,4 +1,4 @@
-import { moveZeroes } from "./p_0283_move_zeroes";
+import { moveZeroes } from "./p_0283_move_zeroes.js";
 
 test("problem 0283", () => {
   let nums = [0, 1, 0, 3, 12];

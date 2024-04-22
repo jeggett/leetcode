@@ -1,4 +1,4 @@
-import { createCounter } from "./p_2665_counter_ii";
+import { createCounter } from "./p_2665_counter_ii.js";
 
 test("problem 2665", () => {
   const counter = createCounter(5);

@@ -75,7 +75,9 @@ elif [ $lang == "ts" ]; then
   fi
 
   file_path=$dir_path/$p_name.ts
-  p_name_camel=$(echo "$p_name" | sed -r 's/_(.)/\U\1/g')
+  p_name_camel=$(printf "%s\n" "$p_name" | awk 'BEGIN{FS="_"} {for(i=1; i<=NF; i++) {if(i>1) printf "%s", toupper(substr($i,1,1)) substr($i,2); else printf "%s", $i}} END{print ""}' )
+
+
   if [ -f $file_path ]; then
     echo "File $file_path already exists"
     exit 1
