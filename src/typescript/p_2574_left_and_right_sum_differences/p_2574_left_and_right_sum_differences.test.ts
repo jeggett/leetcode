@@ -1,4 +1,4 @@
-import { leftRightDifference } from "./p_2574_left_and_right_sum_differences";
+import { leftRightDifference } from "./p_2574_left_and_right_sum_differences.js";
 
 test("problem 2574", () => {
   expect(leftRightDifference([10, 4, 8, 3])).toEqual([15, 1, 11, 22]);

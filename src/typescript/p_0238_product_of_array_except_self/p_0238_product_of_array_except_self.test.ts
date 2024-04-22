@@ -1,4 +1,4 @@
-import { productExceptSelf } from "./p_0238_product_of_array_except_self";
+import { productExceptSelf } from "./p_0238_product_of_array_except_self.js";
 
 test("problem 0238", () => {
   expect(productExceptSelf([1, 2, 3, 4])).toEqual([24, 12, 8, 6]);

@@ -1,4 +1,4 @@
-import { expectFunc } from "./p_2704_to_be_or_not_to_be";
+import { expectFunc } from "./p_2704_to_be_or_not_to_be.js";
 
 test("problem 2704", () => {
   expect(expectFunc(1).toBe(1)).toEqual(true);

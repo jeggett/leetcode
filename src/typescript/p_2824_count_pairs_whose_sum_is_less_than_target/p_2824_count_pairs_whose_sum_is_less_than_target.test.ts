@@ -1,4 +1,4 @@
-import { countPairs } from "./p_2824_count_pairs_whose_sum_is_less_than_target";
+import { countPairs } from "./p_2824_count_pairs_whose_sum_is_less_than_target.js";
 
 test("problem 2824", () => {
   expect(countPairs([-1, 1, 2, 3, 1], 2)).toEqual(3);

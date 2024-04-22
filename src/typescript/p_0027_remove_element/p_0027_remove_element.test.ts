@@ -1,4 +1,4 @@
-import { removeElement } from "./p_27_remove_element";
+import { removeElement } from "./p_0027_remove_element.js";
 
 test("problem p_27_remove_element", () => {
   const arr = [3, 2, 2, 3];

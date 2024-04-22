@@ -1,4 +1,4 @@
-import { map } from "./p_2635_apply_transform_over_each_element_in_array";
+import { map } from "./p_2635_apply_transform_over_each_element_in_array.js";
 
 test("problem 2635", () => {
   const arr = [1, 2, 3];
