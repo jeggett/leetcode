@@ -1,5 +1,5 @@
 export function createHelloWorld() {
-  return function (...args: unknown[]): string {
-    return "Hello World";
-  };
+    return function (): string {
+        return "Hello World";
+    };
 }

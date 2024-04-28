@@ -12,9 +12,15 @@ fi
 # join the remaining arguments with hyphens, remove dots, convert to lower case
 p_name=p-$(echo "$@" | tr '[:upper:]' '[:lower:]' | tr ' ' '-' | tr -cd '[:alnum:]-')
 # pad numbers with zeroes
-p_name=$(echo "$p_name" | sed -r ":r;s/\b[0-9]{1,3}\b/0&/g;tr")
+num=$(echo "$p_name" | grep -o -E '[0-9]+')
+if [ -n "$num" ]; then
+    padded_num=$(printf "%04d" "$num")
+    p_name="${p_name//$num/$padded_num}"
+fi
 
+git stash
 git fetch origin main:main
+git stash pop
 
 branch_name=feat/$p_name
 if git show-ref --quiet refs/heads/$branch_name; then
