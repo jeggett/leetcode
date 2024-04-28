@@ -1,7 +1,4 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: [1](https://code.visualstudio.com/docs/typescript/typescript-debugging)
   "version": "0.2.0",
   "configurations": [
     {
@@ -13,7 +10,6 @@
       "outFiles": ["${workspaceFolder}/build/**/*.js"]
     },
     {
-      // This configuration will run the current Python file with Python
       "name": "Python",
       "type": "debugpy",
       "request": "launch",
