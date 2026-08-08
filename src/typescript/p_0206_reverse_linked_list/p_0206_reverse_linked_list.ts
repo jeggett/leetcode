@@ -1,4 +1,4 @@
-import { LinkedListNode } from "../data_structures/linked_list";
+import type { LinkedListNode } from "../data_structures/linked_list.js";
 
 type Node = LinkedListNode<number> | null;
 

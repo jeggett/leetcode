@@ -2,7 +2,8 @@ from typing import List
 
 
 class Solution:
-    '''time O(N^2), space O(1)'''
+    """time O(N^2), space O(1)"""
+
     def generate(self, numRows: int) -> List[List[int]]:
         result = [[1]]
         if numRows == 1:

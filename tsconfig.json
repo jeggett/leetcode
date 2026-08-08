@@ -1,16 +1,16 @@
 {
   "compilerOptions": {
     "strict": true,
-    "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "outDir": "build",
-    "target": "esnext",
+    "noEmit": true,
+    "target": "ESNext",
     "lib": ["ESNext", "DOM"],
     "module": "ESNext",
-    "sourceMap": true
+    "moduleResolution": "Bundler",
+    "types": ["vitest/globals"]
   },
-  "include": ["src/typescript/"],
+  "include": ["src/typescript/**/*.ts", "vitest.config.ts"],
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Recommended"
 }

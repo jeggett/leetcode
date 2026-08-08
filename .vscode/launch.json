@@ -1,23 +1,23 @@
 {
-  // Use IntelliSense to learn about possible attributes.
-  // Hover to view descriptions of existing attributes.
-  // For more information, visit: [1](https://code.visualstudio.com/docs/typescript/typescript-debugging)
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "TypeScript",
+      "name": "Vitest: Current File",
       "type": "node",
       "request": "launch",
-      "program": "${file}",
-      "preLaunchTask": "tsc: build - tsconfig.json",
-      "outFiles": ["${workspaceFolder}/build/**/*.js"]
+      "runtimeExecutable": "mise",
+      "runtimeArgs": ["exec", "--", "pnpm", "vitest", "run", "${relativeFile}"],
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
     },
     {
-      // This configuration will run the current Python file with Python
-      "name": "Python",
+      "name": "Pytest: Current File",
       "type": "debugpy",
       "request": "launch",
-      "program": "${file}",
+      "module": "pytest",
+      "args": ["${relativeFile}"],
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "justMyCode": true
     }

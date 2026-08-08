@@ -1,6 +1,3 @@
-from typing import List
-
-
 class Solution:
     """time: O(N), space: O(1)"""
 
