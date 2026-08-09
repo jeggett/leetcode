@@ -5,9 +5,7 @@ class Solution:
     def leftRightDifference(self, nums: List[int]) -> List[int]:
         answer = []
         for i in range(0, len(nums)):
-            answer.append(
-                abs(self.computeLeft(nums, i) - self.computeRight(nums, i))
-            )
+            answer.append(abs(self.computeLeft(nums, i) - self.computeRight(nums, i)))
 
         return answer
 

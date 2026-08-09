@@ -1,0 +1,23 @@
+[project]
+name = "leetcode"
+version = "1.0.0"
+description = "LeetCode problem solutions"
+requires-python = ">=3.14"
+
+[dependency-groups]
+dev = [
+    "pytest==9.1.1",
+    "ruff==0.16.2",
+]
+
+[tool.pytest.ini_options]
+addopts = ["--capture=sys"]
+pythonpath = ["."]
+testpaths = ["src/python", "tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]

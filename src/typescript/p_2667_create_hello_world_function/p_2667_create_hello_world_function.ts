@@ -1,5 +1,3 @@
 export function createHelloWorld() {
-    return function (): string {
-        return "Hello World";
-    };
+    return (): string => "Hello World";
 }

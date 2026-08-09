@@ -1,8 +1,16 @@
 {
   "[python]": {
-    "editor.defaultFormatter": "ms-python.black-formatter"
+    "editor.defaultFormatter": "charliermarsh.ruff",
+    "editor.formatOnSave": true
   },
-  "python.testing.pytestArgs": ["src"],
-  "python.testing.unittestEnabled": false,
+  "[typescript]": {
+    "editor.defaultFormatter": "biomejs.biome",
+    "editor.formatOnSave": true
+  },
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv",
+  "python.testing.pytestArgs": ["src/python", "tests"],
   "python.testing.pytestEnabled": true,
+  "python.testing.unittestEnabled": false,
+  "typescript.preferences.importModuleSpecifierEnding": "js",
+  "typescript.tsdk": "node_modules/typescript/lib"
 }

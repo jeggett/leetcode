@@ -1,0 +1,101 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Ready",
+      "type": "process",
+      "command": "mise",
+      "args": ["exec", "--", "pnpm", "ready"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Format",
+      "type": "process",
+      "command": "mise",
+      "args": ["exec", "--", "pnpm", "format"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "Test TypeScript: Current Test File",
+      "type": "process",
+      "command": "mise",
+      "args": ["exec", "--", "pnpm", "test:ts", "${relativeFile}"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Test Python: Current Test File",
+      "type": "process",
+      "command": "mise",
+      "args": ["exec", "--", "pnpm", "test:py", "${relativeFile}"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "Watch TypeScript: Current Test File",
+      "type": "process",
+      "command": "mise",
+      "args": ["exec", "--", "pnpm", "test:ts:watch", "${relativeFile}"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "test",
+      "problemMatcher": []
+    },
+    {
+      "label": "New LeetCode Problem",
+      "type": "process",
+      "command": "mise",
+      "args": [
+        "exec",
+        "--",
+        "pnpm",
+        "new",
+        "${input:problemLanguage}",
+        "${input:problemNumber}",
+        "${input:problemTitle}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "problemLanguage",
+      "type": "pickString",
+      "description": "Solution language",
+      "options": ["ts", "py"],
+      "default": "ts"
+    },
+    {
+      "id": "problemNumber",
+      "type": "promptString",
+      "description": "LeetCode problem number",
+      "default": "1"
+    },
+    {
+      "id": "problemTitle",
+      "type": "promptString",
+      "description": "LeetCode problem title",
+      "default": "Two Sum"
+    }
+  ]
+}
