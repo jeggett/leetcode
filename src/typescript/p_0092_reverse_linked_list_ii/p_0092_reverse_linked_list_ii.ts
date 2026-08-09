@@ -1,19 +1,19 @@
-import type { LinkedListNode } from "../data_structures/linked_list.js";
-
-type ListNode = LinkedListNode<number> | null;
-
 /* time: O(n), space: O(1) */
-export function reverseBetween(head: ListNode, left: number, right: number): ListNode {
+export function reverseBetween(
+    head: ListNode | null,
+    left: number,
+    right: number,
+): ListNode | null {
     if (head === null || left === right) {
         return head;
     }
     // make indexes start from 0, not from 1
     const [leftIndex, rightIndex] = [left - 1, right - 1];
 
-    let leftPtr: ListNode = head;
-    let beforeLeftPtr: ListNode = null;
-    let rightPtr: ListNode = null;
-    let afterRightPtr: ListNode = null;
+    let leftPtr: ListNode | null = head;
+    let beforeLeftPtr: ListNode | null = null;
+    let rightPtr: ListNode | null = null;
+    let afterRightPtr: ListNode | null = null;
 
     if (leftIndex > 0) {
         beforeLeftPtr = head;
@@ -41,9 +41,9 @@ export function reverseBetween(head: ListNode, left: number, right: number): Lis
         afterRightPtr = rightPtr.next;
     }
 
-    let prev: ListNode = afterRightPtr;
-    let current: ListNode = null;
-    let follow: ListNode = leftPtr;
+    let prev: ListNode | null = afterRightPtr;
+    let current: ListNode | null = null;
+    let follow: ListNode | null = leftPtr;
     while (follow !== afterRightPtr) {
         current = follow;
         if (follow !== null) follow = follow.next;

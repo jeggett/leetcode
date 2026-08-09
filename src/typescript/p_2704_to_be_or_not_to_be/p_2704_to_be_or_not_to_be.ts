@@ -1,9 +1,10 @@
 type ToBeOrNotToBe = {
-    toBe: (val: unknown) => boolean | undefined;
-    notToBe: (val: unknown) => boolean | undefined;
+    toBe: (val: unknown) => boolean;
+    notToBe: (val: unknown) => boolean;
 };
 
-export function expectFunc(val: unknown): ToBeOrNotToBe {
+// time: O(1), space: O(1)
+export function expect(val: unknown): ToBeOrNotToBe {
     return {
         toBe: (valToCompare: unknown) => {
             if (val === valToCompare) {

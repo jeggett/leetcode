@@ -5,6 +5,8 @@
   "description": "Repo created to track progress on leetcode",
   "scripts": {
     "new": "uv run python scripts/new_problem.py",
+    "submission": "uv run python scripts/submission.py",
+    "test:one": "uv run python scripts/test_one.py",
     "test": "pnpm run test:ts && pnpm run test:py",
     "test:ts": "vitest run",
     "test:ts:watch": "vitest",
@@ -22,6 +24,7 @@
     "typecheck": "tsc --noEmit",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
     "ready": "pnpm run incomplete && pnpm run check",
+    "doctor": "mise exec -- python scripts/doctor.py",
     "prepare": "husky"
   },
   "repository": {

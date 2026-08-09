@@ -17,19 +17,24 @@ src/
 │       └── test_p_####_<slug>.py
 └── typescript/
     ├── data_structures/
+    ├── judge-types.d.ts
     └── p_####_<slug>/
         ├── p_####_<slug>.ts
         └── p_####_<slug>.test.ts
 scripts/
 ├── check_incomplete.py
-└── new_problem.py
+├── doctor.py
+├── new_problem.py
+├── problem_paths.py
+├── submission.py
+└── test_one.py
 tests/
-├── test_check_incomplete.py
-└── test_new_problem.py
+└── test_*.py
 ```
 
 Problem numbers are zero-padded to four digits. Shared TypeScript helpers belong in
-`src/typescript/data_structures/`; reusable Python helpers should remain explicit and close to
+`src/typescript/data_structures/`; ambient declarations for types supplied by the judge belong in
+`src/typescript/judge-types.d.ts`. Reusable Python helpers should remain explicit and close to
 their consumers unless several solutions genuinely share them.
 
 ## Toolchain
@@ -47,24 +52,33 @@ TypeScript uses Vitest for tests and Biome for linting and formatting. Python us
 tests and Ruff for linting and formatting. TypeScript dependencies are locked in
 `pnpm-lock.yaml`; Python dependencies are locked in `uv.lock`.
 
+The local TypeScript compiler and Node.js tooling stay independently pinned, while solution code
+targets ES2024 to match the language target documented by LeetCode's TypeScript judge. See
+[LeetCode's current language environments](https://support.leetcode.com/hc/en-us/articles/360011833974-What-are-the-environments-for-the-programming-languages).
+
 Keep this repository in the WSL filesystem, for example `~/prj/leetcode`, rather than under
 `/mnt/c`. Git, dependency installation, test discovery, and file watching are substantially
 faster on ext4.
 
 ## Initial setup
 
-From the repository root:
+Install and activate `mise` for your shell using its
+[official getting-started guide](https://mise.jdx.dev/getting-started.html), then run from the
+repository root:
 
 ```bash
 mise trust
 mise install
 pnpm install --frozen-lockfile
 uv sync --frozen
+pnpm prepare
+pnpm run doctor
 ```
 
-`pnpm install` also installs the Husky pre-commit hook. The hook runs `mise exec -- pnpm check`,
-so commits use the repository's pinned tools even if the interactive shell has different global
-versions.
+`pnpm prepare` installs the Husky pre-commit hook explicitly. The hook runs
+`mise exec -- pnpm ready`, so commits use the repository's pinned tools even if the interactive
+shell has different global versions. Run `pnpm prepare` again if `pnpm run doctor` reports that
+`core.hooksPath` is not `.husky/_`.
 
 Confirm the active tools when troubleshooting setup:
 
@@ -75,6 +89,13 @@ pnpm --version
 python --version
 uv --version
 ```
+
+### VS Code and WSL
+
+Open the repository through VS Code's WSL support, accept the workspace extension
+recommendations, and use `${workspaceFolder}/.venv` as the Python interpreter. The Testing view
+then provides pytest and Vitest run/debug controls. Workspace tasks also expose new-problem
+scaffolding, current-test-file runs, watch mode, formatting, and the complete `ready` gate.
 
 ## Solve a problem
 
@@ -107,17 +128,20 @@ branches and commits.
 
 ```bash
 pnpm new ts 1512 "Number of Good Pairs" \
+    --signature 'numIdenticalPairs(nums: number[]): number' \
     --url https://leetcode.com/problems/number-of-good-pairs/
 
-pnpm new py 1512 "Number of Good Pairs"
+pnpm new py 1512 "Number of Good Pairs" \
+    --signature 'numIdenticalPairs(self, nums: list[int]) -> int'
 ```
 
-The URL is optional, but adding the canonical LeetCode problem URL keeps the source traceable.
-The scaffold:
+The signature and URL are optional, but supplying the exact callable avoids replacing a generic
+placeholder and adding the canonical URL keeps the source traceable. Design-class problems can
+still be adjusted manually after generation. The scaffold:
 
-- validates the language, number, title, and optional URL;
+- validates the language, number, title, optional signature, and optional URL;
 - creates the zero-padded problem directory and two files;
-- refuses to overwrite an existing problem;
+- refuses a duplicate problem number or an existing target;
 - prints the suggested branch and focused test command;
 - performs no Git operations.
 
@@ -132,7 +156,8 @@ Keep the local implementation close to the code submitted to LeetCode:
 - Python solutions normally expose the required camelCase method on `Solution`, or implement the
   design class requested by the problem.
 - TypeScript solutions use named exports so their colocated Vitest tests can import them.
-- Relative TypeScript imports include the explicit `.js` extension.
+- TypeScript solution files avoid repository imports; test and helper imports include the
+  explicit `.js` extension. Judge-provided `ListNode` and `TreeNode` types are declared ambiently.
 - Completed solutions include a concise `time: O(...)` / `space: O(...)` comment.
 
 Avoid local CLI parsing, test-only branches, or behavior that will not exist in the submitted
@@ -142,16 +167,13 @@ solution.
 
 ```bash
 # TypeScript
-pnpm test:ts \
-    src/typescript/p_1512_number_of_good_pairs/p_1512_number_of_good_pairs.test.ts
+pnpm test:one ts 1512
 
 # TypeScript watch mode
-pnpm test:ts:watch \
-    src/typescript/p_1512_number_of_good_pairs/p_1512_number_of_good_pairs.test.ts
+pnpm test:one ts 1512 --watch
 
 # Python
-pnpm test:py \
-    src/python/p_1512_number_of_good_pairs/test_p_1512_number_of_good_pairs.py
+pnpm test:one py 1512
 ```
 
 When LeetCode reports a failing input, add it as a regression test before changing the solution.
@@ -173,6 +195,7 @@ Use narrower commands when diagnosing a failure:
 | Command | Purpose |
 | --- | --- |
 | `pnpm test` | Run all TypeScript and Python tests |
+| `pnpm test:one <ts\|py> <number> [--watch]` | Resolve and test one problem |
 | `pnpm test:ts [path]` | Run all or selected Vitest tests |
 | `pnpm test:ts:watch [path]` | Run Vitest in watch mode |
 | `pnpm test:py [path]` | Run all or selected pytest tests |
@@ -183,6 +206,8 @@ Use narrower commands when diagnosing a failure:
 | `pnpm typecheck` | Run TypeScript without emitting files |
 | `pnpm check` | Run formatting, linting, types, and tests |
 | `pnpm ready` | Require complete scaffolds, then run `pnpm check` |
+| `pnpm run doctor` | Verify tools, dependencies, and the Git-hook installation |
+| `pnpm submission <ts\|py> <number> [--copy]` | Render judge-ready source |
 
 Review changes after any formatting command:
 
@@ -194,9 +219,17 @@ git status --short
 
 ### 7. Submit and save the accepted solution
 
-Copy only the implementation and required helpers into the LeetCode editor. Preserve the exact
-signature expected by the judge. Remove repository-only module syntax such as a TypeScript
-`export` when it is not part of LeetCode's starter code; do not copy local tests or imports.
+Render the exact source intended for the judge:
+
+```bash
+pnpm submission ts 268
+pnpm submission py 1512 --copy
+```
+
+The TypeScript renderer removes supported top-level module exports and refuses module imports,
+CommonJS module syntax, triple-slash references, or unsupported export forms rather than
+guessing. Python source is emitted unchanged. Always preserve the exact signature expected by
+the judge.
 
 After acceptance:
 
@@ -213,6 +246,9 @@ git push -u origin HEAD
 
 Use the equivalent Python path for a Python solution. A pull request should link the problem,
 summarize the algorithm and complexity, and record the validation command.
+
+GitHub Actions runs the same frozen setup and `pnpm ready` gate for pushes and pull requests to
+`main`.
 
 ## License
 

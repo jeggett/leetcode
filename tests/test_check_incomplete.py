@@ -8,8 +8,7 @@ from scripts.check_incomplete import incomplete_scaffolds, main
 IMPLEMENTATION_MARKER = "TODO: implement the solution"
 TEST_MARKER = "TODO: add examples and edge cases"
 COMPLEXITY_MARKER = "time: TODO, space: TODO"
-PYTHON_SKIP_MARKER = "@pytest.mark.skip("
-TYPESCRIPT_SKIP_MARKER = "test.skip("
+GENERATED_TEST_SENTINEL = "GENERATED_SCAFFOLD_TEST"
 
 
 def write_source(root: Path, relative_path: str, content: str) -> None:
@@ -61,42 +60,83 @@ def test_reports_typescript_complexity_placeholder(tmp_path: Path) -> None:
     ]
 
 
-def test_reports_scaffold_skips_with_changed_reasons(tmp_path: Path) -> None:
+def test_reports_generated_scaffold_sentinel_with_changed_reason(tmp_path: Path) -> None:
     write_source(
         tmp_path,
         "src/python/p_0001/test_p_0001.py",
-        '@pytest.mark.skip (reason="renamed")\ndef test_p_0001() -> None:\n    pass\n',
+        f'# {GENERATED_TEST_SENTINEL}\n@pytest.mark.skip(reason="renamed")\ndef test_p_0001() -> None:\n    pass\n',
     )
     write_source(
         tmp_path,
         "src/typescript/p_0002/p_0002.test.ts",
-        'test.skip ("renamed", () => {});\n',
+        f'// {GENERATED_TEST_SENTINEL}\ntest.skip("renamed", () => {{}});\n',
     )
 
     assert incomplete_scaffolds(tmp_path) == [
-        (Path("src/python/p_0001/test_p_0001.py"), PYTHON_SKIP_MARKER),
-        (Path("src/typescript/p_0002/p_0002.test.ts"), TYPESCRIPT_SKIP_MARKER),
+        (Path("src/python/p_0001/test_p_0001.py"), GENERATED_TEST_SENTINEL),
+        (Path("src/typescript/p_0002/p_0002.test.ts"), GENERATED_TEST_SENTINEL),
     ]
 
 
-def test_does_not_treat_skipif_as_a_scaffold_skip(tmp_path: Path) -> None:
+def test_detects_only_anchored_sentinels_in_conventional_test_files(tmp_path: Path) -> None:
+    write_source(
+        tmp_path,
+        "src/python/p_0001/p_0001.py",
+        f"# {GENERATED_TEST_SENTINEL}\n",
+    )
     write_source(
         tmp_path,
         "src/python/p_0001/test_p_0001.py",
-        '@pytest.mark.skipif(False, reason="platform")\ndef test_p_0001() -> None:\n    pass\n',
+        f'# {GENERATED_TEST_SENTINEL} trailing\nvalue = "{GENERATED_TEST_SENTINEL}"\n',
+    )
+    write_source(
+        tmp_path,
+        "src/typescript/p_0002/p_0002.test.ts",
+        f"// {GENERATED_TEST_SENTINEL}\n",
+    )
+
+    assert incomplete_scaffolds(tmp_path) == [
+        (Path("src/typescript/p_0002/p_0002.test.ts"), GENERATED_TEST_SENTINEL),
+    ]
+
+
+def test_exact_test_marker_takes_priority_over_generated_sentinel(tmp_path: Path) -> None:
+    write_source(
+        tmp_path,
+        "src/python/p_0001/test_p_0001.py",
+        f"# {GENERATED_TEST_SENTINEL}\n# {TEST_MARKER}\n",
+    )
+
+    assert incomplete_scaffolds(tmp_path) == [
+        (Path("src/python/p_0001/test_p_0001.py"), TEST_MARKER),
+    ]
+
+
+def test_does_not_treat_non_generated_skips_as_scaffolds(tmp_path: Path) -> None:
+    write_source(
+        tmp_path,
+        "src/python/p_0001/test_p_0001.py",
+        '@pytest.mark.skip(reason="platform")\ndef test_p_0001() -> None:\n    pass\n',
+    )
+    write_source(
+        tmp_path,
+        "src/typescript/p_0002/p_0002.test.ts",
+        'test.skip("platform", () => {});\n',
     )
 
     assert incomplete_scaffolds(tmp_path) == []
 
 
-def test_does_not_apply_typescript_complexity_marker_to_python(tmp_path: Path) -> None:
+def test_reports_python_complexity_placeholder(tmp_path: Path) -> None:
     write_source(
         tmp_path,
         "src/python/p_0001/p_0001.py",
         f"# {COMPLEXITY_MARKER}\nclass Solution:\n    pass\n",
     )
 
-    assert incomplete_scaffolds(tmp_path) == []
+    assert incomplete_scaffolds(tmp_path) == [
+        (Path("src/python/p_0001/p_0001.py"), COMPLEXITY_MARKER),
+    ]
 
 
 def test_missing_source_directories_are_clean(tmp_path: Path) -> None:

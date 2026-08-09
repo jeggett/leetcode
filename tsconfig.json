@@ -4,8 +4,8 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
-    "target": "ESNext",
-    "lib": ["ESNext", "DOM"],
+    "target": "ES2024",
+    "lib": ["ES2024", "DOM"],
     "module": "ESNext",
     "moduleResolution": "Bundler",
     "types": ["vitest/globals"]

@@ -12,41 +12,50 @@ from pathlib import Path
 IMPLEMENTATION_MARKER = "TODO: implement the solution"
 TEST_MARKER = "TODO: add examples and edge cases"
 COMPLEXITY_MARKER = "time: TODO, space: TODO"
-PYTHON_SKIP_MARKER = "@pytest.mark.skip("
-TYPESCRIPT_SKIP_MARKER = "test.skip("
+GENERATED_TEST_SENTINEL = "GENERATED_SCAFFOLD_TEST"
 
 SCAFFOLD_MARKERS = (IMPLEMENTATION_MARKER, TEST_MARKER)
 SOURCE_DIRECTORIES = ("src/python", "src/typescript")
 
-PYTHON_SKIP_PATTERN = re.compile(r"^[ \t]*@pytest\.mark\.skip\s*\(", re.MULTILINE)
-TYPESCRIPT_SKIP_PATTERN = re.compile(r"^[ \t]*test\.skip\s*\(", re.MULTILINE)
 COMPLEXITY_PATTERN = re.compile(r"\btime:\s*TODO\s*,\s*space:\s*TODO\b")
+PYTHON_TEST_NAME = re.compile(r"^test_.+\.py$")
+TYPESCRIPT_TEST_NAME = re.compile(r"^.+\.test\.ts$")
+PYTHON_GENERATED_TEST_SENTINEL_PATTERN = re.compile(
+    rf"^[ \t]*#[ \t]*{GENERATED_TEST_SENTINEL}[ \t]*$", re.MULTILINE
+)
+TYPESCRIPT_GENERATED_TEST_SENTINEL_PATTERN = re.compile(
+    rf"^[ \t]*//[ \t]*{GENERATED_TEST_SENTINEL}[ \t]*$", re.MULTILINE
+)
 
 
-def is_scaffold_test(path: Path) -> bool:
-    """Return whether a path has one of the generated test-file names."""
-    return (path.name.startswith("test_") and path.suffix == ".py") or path.name.endswith(
-        ".test.ts"
+def is_conventional_test(path: Path) -> bool:
+    """Return whether a path uses a conventional generated test-file name."""
+    return bool(PYTHON_TEST_NAME.fullmatch(path.name) or TYPESCRIPT_TEST_NAME.fullmatch(path.name))
+
+
+def has_generated_test_sentinel(path: Path, content: str) -> bool:
+    """Return whether a conventional test contains an exact generated sentinel comment."""
+    if not is_conventional_test(path):
+        return False
+    pattern = (
+        PYTHON_GENERATED_TEST_SENTINEL_PATTERN
+        if path.suffix == ".py"
+        else TYPESCRIPT_GENERATED_TEST_SENTINEL_PATTERN
     )
+    return pattern.search(content) is not None
 
 
 def scaffold_markers(path: Path, content: str) -> list[str]:
     """Return incomplete scaffold markers found in one source or test file."""
     markers = [marker for marker in SCAFFOLD_MARKERS if marker in content]
     if (
-        path.suffix == ".ts"
+        path.suffix in {".py", ".ts"}
         and IMPLEMENTATION_MARKER not in content
         and COMPLEXITY_PATTERN.search(content)
     ):
         markers.append(COMPLEXITY_MARKER)
-    if is_scaffold_test(path) and TEST_MARKER not in content:
-        skip_pattern, skip_marker = (
-            (PYTHON_SKIP_PATTERN, PYTHON_SKIP_MARKER)
-            if path.suffix == ".py"
-            else (TYPESCRIPT_SKIP_PATTERN, TYPESCRIPT_SKIP_MARKER)
-        )
-        if skip_pattern.search(content):
-            markers.append(skip_marker)
+    if has_generated_test_sentinel(path, content) and TEST_MARKER not in content:
+        markers.append(GENERATED_TEST_SENTINEL)
     return markers
 
 

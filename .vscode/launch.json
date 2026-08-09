@@ -2,17 +2,21 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Vitest: Current File",
+      "name": "Vitest: Current Test File",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "mise",
-      "runtimeArgs": ["exec", "--", "pnpm", "vitest", "run", "${relativeFile}"],
+      "runtimeArgs": ["exec", "--", "node"],
+      "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
+      "args": ["run", "${relativeFile}"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "smartStep": true,
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Pytest: Current File",
+      "name": "Pytest: Current Test File",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",

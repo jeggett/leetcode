@@ -1,11 +1,7 @@
-import type { LinkedListNode } from "../data_structures/linked_list.js";
-
-type Node = LinkedListNode<number> | null;
-
 /* time: O(n), space: O(1) */
-export function reverseList(head: Node): Node {
-    let prevPtr: Node = null;
-    let currentPtr: Node = null;
+export function reverseList(head: ListNode | null): ListNode | null {
+    let prevPtr: ListNode | null = null;
+    let currentPtr: ListNode | null = null;
     let nextPtr = head;
 
     while (nextPtr !== null) {

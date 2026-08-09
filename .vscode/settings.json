@@ -11,5 +11,6 @@
   "python.testing.pytestArgs": ["src/python", "tests"],
   "python.testing.pytestEnabled": true,
   "python.testing.unittestEnabled": false,
+  "typescript.preferences.importModuleSpecifierEnding": "js",
   "typescript.tsdk": "node_modules/typescript/lib"
 }
