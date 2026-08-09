@@ -6,6 +6,7 @@ import pytest
 from scripts import submission
 from scripts.submission import (
     SubmissionError,
+    TypeScriptLexer,
     clipboard_command,
     copy_to_clipboard,
     parse_arguments,
@@ -101,6 +102,23 @@ def test_typescript_submission_handles_regex_after_return_with_template_characte
 }
 """
     )
+
+
+def test_typescript_submission_allows_division_after_postfix_non_null_assertion() -> None:
+    source = """export function divide(value: number | undefined, divisor: number): number {
+    return value! / divisor;
+}
+"""
+
+    assert typescript_submission(source) == source.replace("export", "", 1)
+
+
+def test_typescript_lexer_allows_regex_after_prefix_logical_not() -> None:
+    tokens = TypeScriptLexer("const matches = !/value/.test(input);\n").tokenize()
+
+    assert [(token.value, token.kind) for token in tokens if token.kind == "regex"] == [
+        ("<regex>", "regex")
+    ]
 
 
 def test_typescript_submission_allows_templates_without_dependencies() -> None:

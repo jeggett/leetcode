@@ -379,6 +379,9 @@ class TypeScriptLexer:
         self.last_value = value
         if value == ")":
             self.regex_allowed = starts_statement
+        elif value == "!" and not self.regex_allowed:
+            # A postfix non-null assertion follows an expression; a prefix logical-not does not.
+            self.regex_allowed = False
         elif value in {".", "?.", "++", "--", "]", "}"}:
             self.regex_allowed = False
         else:
