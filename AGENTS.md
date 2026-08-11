@@ -15,31 +15,28 @@ Install the pinned toolchain with `mise install`, JavaScript dependencies with `
 and Python dependencies with `uv sync --frozen`. `mise.toml` pins Node.js, pnpm, Python, and
 uv. TypeScript uses Vitest and Biome; Python uses pytest and Ruff.
 
-Create a solution pair with `pnpm new ts 1512 "Number of Good Pairs"` (or `py`). Pass the
-optional canonical URL with `--url <url>` and the exact judge callable with
-`--signature <signature>`. The scaffold creates files only; it performs no Git operations and
-prints the suggested branch and focused test command.
+Use `lc` as the public workflow command. `lc <leetcode-url>` fetches official metadata, creates
+and checks out `feat/p-####-slug`, and scaffolds TypeScript; add `py` before the URL for Python.
+Use `lc new [ts|py] <number> <title...>` as the file-only manual fallback, with optional `--url`
+and `--signature` metadata.
 
-- `pnpm test` runs all TypeScript and Python tests.
-- `pnpm test:one <ts|py> <number>` resolves and runs one problem; TypeScript also accepts
-  `--watch`.
-- `pnpm test:ts <path>` and `pnpm test:py <path>` run focused tests; `pnpm test:ts:watch`
-  starts Vitest watch mode.
-- `pnpm submission <ts|py> <number>` prints judge-ready source; `--copy` copies it when a
-  supported clipboard command is available.
-- `pnpm run doctor` verifies the local toolchain, dependencies, and Git-hook installation.
-- `pnpm lint`, `pnpm typecheck`, and `pnpm format:check` run individual read-only checks.
-- `pnpm format` applies Biome and Ruff formatting.
-- `pnpm check` runs format checks, linting, TypeScript type checking, and all tests; run it
-  before submitting.
-- `pnpm incomplete` reports untouched scaffold markers; `pnpm ready` requires none and then
-  runs the complete checks.
+- `lc test` runs the current problem when detected from the caller directory or problem branch,
+  otherwise all tests. Pass `[ts|py] <number-or-path>` explicitly; `lc watch` enables Vitest watch.
+- `lc submit [ts|py] [number]` prints judge-ready source; `lc copy` also copies it.
+- `lc doctor` verifies the toolchain, dependencies, and Git-hook installation.
+- `lc lint`, `lc typecheck`, and `lc format --check` run individual read-only checks.
+- `lc format` applies Biome and Ruff formatting.
+- `lc check` runs format checks, linting, TypeScript type checking, and all tests.
+- `lc incomplete` reports untouched scaffold markers; `lc ready` requires none and then runs the
+  complete checks. Run `lc ready` before submitting.
+
+The `pnpm` scripts remain stable low-level interfaces for automation and unusual runner options.
 
 ## Style and tests
 
 Use four spaces, UTF-8, final newlines, and no trailing whitespace. Keep explicit `.js`
 extensions in relative TypeScript test/helper imports. TypeScript solution files should avoid
-module imports, CommonJS module syntax, and triple-slash references so `pnpm submission` can
+module imports, CommonJS module syntax, and triple-slash references so `lc submit` can
 render them safely. Prefer named TypeScript exports, target ES2024 APIs, and include a concise
 `time: O(...)` / `space: O(...)` comment in completed solutions. Python solutions normally use a
 `Solution` class with LeetCode-compatible camelCase methods.

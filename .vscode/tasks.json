@@ -5,7 +5,7 @@
       "label": "Ready",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "pnpm", "ready"],
+      "args": ["exec", "--", "lc", "ready"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -19,7 +19,7 @@
       "label": "Format",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "pnpm", "format"],
+      "args": ["exec", "--", "lc", "format"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -29,7 +29,7 @@
       "label": "Test TypeScript: Current Test File",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "pnpm", "test:ts", "${relativeFile}"],
+      "args": ["exec", "--", "lc", "test", "${relativeFile}"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -40,7 +40,7 @@
       "label": "Test Python: Current Test File",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "pnpm", "test:py", "${relativeFile}"],
+      "args": ["exec", "--", "lc", "test", "${relativeFile}"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -51,7 +51,7 @@
       "label": "Watch TypeScript: Current Test File",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "pnpm", "test:ts:watch", "${relativeFile}"],
+      "args": ["exec", "--", "lc", "watch", "${relativeFile}"],
       "options": {
         "cwd": "${workspaceFolder}"
       },
@@ -59,13 +59,29 @@
       "problemMatcher": []
     },
     {
-      "label": "New LeetCode Problem",
+      "label": "New LeetCode Problem from URL",
       "type": "process",
       "command": "mise",
       "args": [
         "exec",
         "--",
-        "pnpm",
+        "lc",
+        "${input:problemLanguage}",
+        "${input:problemUrl}"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "New LeetCode Problem (Manual)",
+      "type": "process",
+      "command": "mise",
+      "args": [
+        "exec",
+        "--",
+        "lc",
         "new",
         "${input:problemLanguage}",
         "${input:problemNumber}",
@@ -84,6 +100,12 @@
       "description": "Solution language",
       "options": ["ts", "py"],
       "default": "ts"
+    },
+    {
+      "id": "problemUrl",
+      "type": "promptString",
+      "description": "LeetCode problem URL",
+      "default": "https://leetcode.com/problems/two-sum/"
     },
     {
       "id": "problemNumber",

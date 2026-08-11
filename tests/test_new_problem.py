@@ -297,8 +297,8 @@ def test_main_prints_short_focused_test_and_ready_steps(
     assert new_problem.main(["py", "8", "String to Integer (atoi)"]) == 0
 
     output = capsys.readouterr().out
-    assert "pnpm test:one py 0008" in output
-    assert "pnpm ready" in output
+    assert "lc test py 0008" in output
+    assert "lc ready" in output
 
 
 def test_main_prints_typescript_watch_command(
@@ -309,8 +309,8 @@ def test_main_prints_typescript_watch_command(
     assert new_problem.main(["ts", "8", "String to Integer (atoi)"]) == 0
 
     output = capsys.readouterr().out
-    assert "pnpm test:one ts 0008" in output
-    assert "pnpm test:one ts 0008 --watch" in output
+    assert "lc test ts 0008" in output
+    assert "lc watch 0008" in output
 
 
 def test_usage_mentions_signature_option() -> None:
