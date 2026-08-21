@@ -72,6 +72,8 @@ Install and activate `mise` for your shell using its
 repository root:
 
 ```bash
+mise settings add idiomatic_version_file_enable_tools node
+mise settings add idiomatic_version_file_enable_tools pnpm
 mise trust
 mise install
 pnpm install --frozen-lockfile

@@ -4,35 +4,34 @@ const isDigit = (str: string) => /^\d$/.test(str);
 export function validWordAbbreviation(word: string, abbr: string): boolean {
     let wordIndex = 0;
     let abbrIndex = 0;
+
     while (wordIndex < word.length && abbrIndex < abbr.length) {
-        if (word[wordIndex] !== abbr[abbrIndex]) {
-            if (isDigit(abbr[abbrIndex])) {
-                const digits = [];
-                while (isDigit(abbr[abbrIndex])) {
-                    digits.push(abbr[abbrIndex]);
-                    abbrIndex++;
-                }
-                if (digits[0] === "0") {
-                    return false;
-                }
-                const number = parseInt(digits.join(""), 10);
-                for (let i = 0; i < number; i++) {
-                    wordIndex++;
-                }
-                if (wordIndex === word.length) {
-                    break;
-                }
-                continue;
-            } else {
+        const abbreviationCharacter = abbr[abbrIndex];
+
+        if (isDigit(abbreviationCharacter)) {
+            if (abbreviationCharacter === "0") {
                 return false;
             }
+
+            let skippedCharacters = 0;
+            while (abbrIndex < abbr.length && isDigit(abbr[abbrIndex])) {
+                skippedCharacters = skippedCharacters * 10 + Number(abbr[abbrIndex]);
+                if (skippedCharacters > word.length - wordIndex) {
+                    return false;
+                }
+                abbrIndex++;
+            }
+            wordIndex += skippedCharacters;
+            continue;
         }
-        // case where the digit is at the end
+
+        if (word[wordIndex] !== abbreviationCharacter) {
+            return false;
+        }
+
         wordIndex++;
         abbrIndex++;
     }
 
     return wordIndex === word.length && abbrIndex === abbr.length;
 }
-
-// TODO compare with other people sulutions
