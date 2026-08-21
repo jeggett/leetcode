@@ -473,6 +473,13 @@ def _require_new_branch(root: Path, branch: str, run: GitRunner) -> None:
     if existing.returncode != 1:
         raise _git_error("check the target branch", existing)
 
+    remote_refs = run(("git", "for-each-ref", "--format=%(refname)", "refs/remotes"), root)
+    if remote_refs.returncode != 0:
+        raise _git_error("check remote target branches", remote_refs)
+    remote_suffix = f"/{branch}"
+    if any(ref.strip().endswith(remote_suffix) for ref in remote_refs.stdout.splitlines()):
+        raise LeetError(f"branch already exists on a remote: {branch}")
+
 
 def _require_new_problem(root: Path, language: str, metadata: ProblemMetadata) -> None:
     slug = slugify(metadata.title)

@@ -87,10 +87,18 @@ class FakeResponse:
 
 
 class FakeGit:
-    def __init__(self, root: Path, *, dirty: bool = False, branch_exists: bool = False) -> None:
+    def __init__(
+        self,
+        root: Path,
+        *,
+        dirty: bool = False,
+        branch_exists: bool = False,
+        remote_branch_exists: bool = False,
+    ) -> None:
         self.root = root
         self.dirty = dirty
         self.branch_exists = branch_exists
+        self.remote_branch_exists = remote_branch_exists
         self.current_branch = "main"
         self.calls: list[tuple[str, ...]] = []
         self.fail_delete = False
@@ -107,6 +115,9 @@ class FakeGit:
             return CommandResult(0, f"{self.current_branch}\n")
         if call[:4] == ("git", "show-ref", "--verify", "--quiet"):
             return CommandResult(0 if self.branch_exists else 1)
+        if call == ("git", "for-each-ref", "--format=%(refname)", "refs/remotes"):
+            remote_ref = "refs/remotes/origin/feat/p-0035-search-insert-position\n"
+            return CommandResult(0, remote_ref if self.remote_branch_exists else "")
         if call[:3] == ("git", "switch", "-c"):
             self.current_branch = call[3]
             return CommandResult(0)
@@ -407,6 +418,21 @@ def test_existing_branch_or_problem_stops_before_checkout(tmp_path: Path) -> Non
             run=problem_git,
         )
     assert not any(call[:3] == ("git", "switch", "-c") for call in problem_git.calls)
+
+
+def test_existing_remote_branch_stops_before_checkout(tmp_path: Path) -> None:
+    git = FakeGit(tmp_path, remote_branch_exists=True)
+
+    with pytest.raises(LeetError, match="branch already exists on a remote"):
+        scaffold_from_url(
+            tmp_path,
+            "ts",
+            PROBLEM_URL,
+            fetch=lambda _language, _url: metadata(),
+            run=git,
+        )
+
+    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
 
 
 def test_scaffold_failure_restores_and_deletes_new_branch(tmp_path: Path) -> None:
