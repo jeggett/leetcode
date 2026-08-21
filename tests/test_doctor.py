@@ -11,8 +11,9 @@ from scripts.doctor import CommandResult, collect_checks, format_report, main, p
 
 
 def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None:
+    (root / ".node-version").write_text("26.7.0\n", encoding="utf-8")
     (root / "mise.toml").write_text(
-        '[tools]\nnode = "26.7.0"\npnpm = "11.20.0"\npython = "3.14.7"\nuv = "0.12.2"\n',
+        '[tools]\npython = "3.14.7"\nuv = "0.12.2"\n',
         encoding="utf-8",
     )
     (root / "package.json").write_text(
@@ -121,9 +122,44 @@ def test_collect_checks_reports_setup_failures_with_remedies(tmp_path: Path) -> 
     results = {check.name: check for check in checks}
 
     assert not results["command: uv"].passed
-    assert "expected pnpm@11.20.0" in results["packageManager"].detail
+    assert not results["pnpm version"].passed
+    assert "expected 10.0.0, found 11.20.0" in results["pnpm version"].detail
     assert "pnpm install --frozen-lockfile" in results["node_modules (vitest)"].detail
     assert "uv sync --frozen" in results[".venv (pytest)"].detail
+
+
+def test_collect_checks_rejects_non_pnpm_package_manager(tmp_path: Path) -> None:
+    write_metadata(tmp_path, package_manager="npm@11.20.0")
+
+    checks = collect_checks(
+        tmp_path,
+        find_command=lambda _: "/usr/bin/tool",
+        run=command_runner,
+    )
+    results = {check.name: check for check in checks}
+
+    assert not results["packageManager"].passed
+    assert "expected pnpm@<version>" in results["packageManager"].detail
+    assert not results["pnpm version"].passed
+    assert "not pinned in package.json packageManager" in results["pnpm version"].detail
+
+
+def test_collect_checks_rejects_a_pnpm_pin_in_mise(tmp_path: Path) -> None:
+    write_metadata(tmp_path)
+    (tmp_path / "mise.toml").write_text(
+        '[tools]\npnpm = "11.20.0"\npython = "3.14.7"\nuv = "0.12.2"\n',
+        encoding="utf-8",
+    )
+
+    checks = collect_checks(
+        tmp_path,
+        find_command=lambda _: "/usr/bin/tool",
+        run=command_runner,
+    )
+    metadata = next(check for check in checks if check.name == "metadata")
+
+    assert not metadata.passed
+    assert "must not pin pnpm" in metadata.detail
 
 
 def test_collect_checks_requires_the_husky_hook_path(tmp_path: Path) -> None:

@@ -28,6 +28,7 @@ VERSION_COMMANDS = {
     "uv": ("uv", "--version"),
 }
 VERSION_PATTERN = re.compile(r"v?(\d+(?:\.\d+){0,2})")
+PACKAGE_MANAGER_PATTERN = re.compile(r"pnpm@v?(\d+(?:\.\d+){0,2})")
 NODE_DEPENDENCY = "vitest"
 PYTHON_DEPENDENCY = "pytest"
 HUSKY_GENERATED_HOOK = Path(".husky/_/pre-commit")
@@ -89,6 +90,7 @@ def parse_version(output: str) -> str | None:
 
 def read_metadata(root: Path) -> tuple[dict[str, str], dict[str, object], dict[str, object]]:
     """Read the tool and dependency metadata required for setup checks."""
+    node_version = (root / ".node-version").read_text(encoding="utf-8").strip()
     with (root / "mise.toml").open("rb") as mise_file:
         mise_data = tomllib.load(mise_file)
     with (root / "package.json").open(encoding="utf-8") as package_file:
@@ -101,26 +103,44 @@ def read_metadata(root: Path) -> tuple[dict[str, str], dict[str, object], dict[s
         isinstance(name, str) and isinstance(version, str) for name, version in tools.items()
     ):
         raise ValueError("mise.toml has no valid [tools] table")
+    if "node" in tools:
+        raise ValueError("mise.toml must not pin Node; use .node-version")
+    if "pnpm" in tools:
+        raise ValueError("mise.toml must not pin pnpm; use package.json packageManager")
+    node_match = VERSION_PATTERN.fullmatch(node_version)
+    if node_match is None:
+        raise ValueError(".node-version must contain one dotted Node version")
     if not isinstance(package_data, dict):
         raise ValueError("package.json must contain an object")
     if not isinstance(project_data, dict):
         raise ValueError("pyproject.toml must contain an object")
-    return tools, package_data, project_data
+    return {"node": node_match.group(1), **tools}, package_data, project_data
+
+
+def expected_package_manager_version(package: dict[str, object]) -> str | None:
+    """Return the exact pnpm version declared by package.json's packageManager field."""
+    package_manager = package.get("packageManager")
+    match = (
+        PACKAGE_MANAGER_PATTERN.fullmatch(package_manager)
+        if isinstance(package_manager, str)
+        else None
+    )
+    return match.group(1) if match else None
 
 
 def metadata_checks(tools: dict[str, str], package: dict[str, object]) -> list[Check]:
-    """Check the package metadata is consistent with the pinned tool versions."""
+    """Check package metadata is consistent with the repository's pinned tool versions."""
     checks: list[Check] = []
 
     package_manager = package.get("packageManager")
-    expected_pnpm = f"pnpm@{tools.get('pnpm', '')}"
+    expected_pnpm = expected_package_manager_version(package)
     checks.append(
         Check(
             "packageManager",
-            package_manager == expected_pnpm,
+            expected_pnpm is not None,
             f"{package_manager!s}"
-            if package_manager == expected_pnpm
-            else f"expected {expected_pnpm}",
+            if expected_pnpm is not None
+            else f"{package_manager!s}; expected pnpm@<version>",
         )
     )
 
@@ -158,15 +178,21 @@ def version_tuple(version: str) -> tuple[int, int, int]:
 def version_checks(
     root: Path,
     tools: dict[str, str],
+    package: dict[str, object],
     available: set[str],
     run: CommandRunner,
 ) -> list[Check]:
-    """Compare installed runtime versions with the versions pinned by mise."""
+    """Compare installed runtime versions with the repository's metadata pins."""
     checks: list[Check] = []
     for command, invocation in VERSION_COMMANDS.items():
-        expected = tools.get(command)
+        expected = (
+            expected_package_manager_version(package) if command == "pnpm" else tools.get(command)
+        )
         if expected is None:
-            checks.append(Check(f"{command} version", False, "not pinned in mise.toml"))
+            source = (
+                "package.json packageManager" if command == "pnpm" else ".node-version or mise.toml"
+            )
+            checks.append(Check(f"{command} version", False, f"not pinned in {source}"))
             continue
         if command not in available:
             checks.append(Check(f"{command} version", False, "command is unavailable"))
@@ -434,7 +460,7 @@ def collect_checks(
         return checks
 
     checks.extend(metadata_checks(tools, package))
-    checks.extend(version_checks(root, tools, available, run))
+    checks.extend(version_checks(root, tools, package, available, run))
     checks.extend(dependency_checks(root, package, project))
     checks.extend(husky_checks(root, available, run))
     return checks

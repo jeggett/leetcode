@@ -12,8 +12,10 @@ tests are in `tests/`.
 ## Tooling and commands
 
 Install the pinned toolchain with `mise install`, JavaScript dependencies with `pnpm install`,
-and Python dependencies with `uv sync --frozen`. `mise.toml` pins Node.js, pnpm, Python, and
-uv. TypeScript uses Vitest and Biome; Python uses pytest and Ruff.
+and Python dependencies with `uv sync --frozen`. `.node-version` pins Node.js;
+`package.json`'s `packageManager` pins pnpm; and `mise.toml` pins Python and uv. The global mise
+configuration should enable idiomatic pnpm version-file support. TypeScript uses Vitest and Biome;
+Python uses pytest and Ruff.
 
 Use `lc` as the public workflow command. `lc <leetcode-url>` fetches official metadata, creates
 and checks out `feat/p-####-slug`, and scaffolds TypeScript; add `py` before the URL for Python.

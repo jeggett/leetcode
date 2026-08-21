@@ -42,14 +42,16 @@ their consumers unless several solutions genuinely share them.
 
 ## Toolchain
 
-`mise.toml` pins the versions used by this repository:
+`.node-version` pins Node.js, `package.json`'s `packageManager` pins pnpm, and `mise.toml` pins the
+remaining project tools. The global mise configuration supplies pnpm through its idiomatic
+version-file support; pnpm is intentionally not duplicated in `mise.toml`:
 
 | Tool | Version | Purpose |
 | --- | ---: | --- |
 | Node.js | 26.7.0 | TypeScript runtime and tooling |
-| pnpm | 11.20.0 | JavaScript package manager and task runner |
-| Python | 3.14.7 | Python solutions and repository scripts |
-| uv | 0.12.2 | Python environment and dependency management |
+| pnpm | 11.20.0 | JavaScript package manager and task runner (`package.json`) |
+| Python | 3.14.7 | Python solutions and repository scripts (`mise.toml`) |
+| uv | 0.12.2 | Python environment and dependency management (`mise.toml`) |
 
 TypeScript uses Vitest for tests and Biome for linting and formatting. Python uses pytest for
 tests and Ruff for linting and formatting. TypeScript dependencies are locked in
