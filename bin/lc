@@ -1,0 +1,10 @@
+#!/usr/bin/env sh
+
+set -eu
+
+BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+REPOSITORY_ROOT=$(CDPATH= cd -- "$BIN_DIR/.." && pwd -P)
+CALLER_DIRECTORY=$(pwd -P)
+
+LC_CALLER_CWD=$CALLER_DIRECTORY exec mise -C "$REPOSITORY_ROOT" exec -- \
+    python "$REPOSITORY_ROOT/scripts/lc.py" "$@"

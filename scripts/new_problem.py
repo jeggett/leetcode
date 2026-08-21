@@ -472,10 +472,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     print(f"Suggested branch: {branch}")
     print("Next steps:")
     normalized_id = normalize_problem_id(problem_number)
-    print(f"  pnpm test:one {language} {normalized_id}")
+    print(f"  lc test {language} {normalized_id}")
     if language == "ts":
-        print(f"  pnpm test:one ts {normalized_id} --watch")
-    print("  pnpm ready")
+        print(f"  lc watch {normalized_id}")
+    print("  lc ready")
     return 0
 
 
