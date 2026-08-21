@@ -13,4 +13,4 @@
 
 ## Validation
 
-- [ ] `pnpm ready`
+- [ ] `lc ready`
