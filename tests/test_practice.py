@@ -565,6 +565,77 @@ def test_retry_rejects_colocated_python_test_dependencies_before_writing(
     assert not (tmp_path / ".lc/practice-attempts").exists()
 
 
+def test_retry_preserves_python_dataclass_constructor_fields(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0301",
+        "tree_node",
+        source=(
+            "from __future__ import annotations\n"
+            "from dataclasses import dataclass\n\n"
+            "@dataclass\n"
+            "class TreeNode:\n"
+            "    val: int\n"
+            "    left: TreeNode | None = None\n"
+        ),
+    )
+    (directory / "test_p_0301_tree_node.py").write_text(
+        "from p_0301_tree_node import TreeNode\n",
+        encoding="utf-8",
+    )
+
+    source = retry(tmp_path, "0301", "py").path.read_text(encoding="utf-8")
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+    tree_node_class = namespace["TreeNode"]
+    assert isinstance(tree_node_class, type)
+    node = tree_node_class(1)
+
+    assert "@dataclass" in source
+    assert "val: int" in source
+    assert node.val == 1
+    assert node.left is None
+
+
+def test_retry_preserves_python_property_setter_and_deleter(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0302",
+        "box",
+        source=(
+            "class Box:\n"
+            "    @property\n"
+            "    def value(self) -> int:\n"
+            "        return 99\n\n"
+            "    @value.setter\n"
+            "    def value(self, new_value: int) -> None:\n"
+            "        self._value = new_value\n\n"
+            "    @value.deleter\n"
+            "    def value(self) -> None:\n"
+            "        del self._value\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "test_p_0302_box.py").write_text(
+        "from p_0302_box import Box\n",
+        encoding="utf-8",
+    )
+
+    source = retry(tmp_path, "0302", "py").path.read_text(encoding="utf-8")
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+    box_class = namespace["Box"]
+    assert isinstance(box_class, type)
+    descriptor = vars(box_class)["value"]
+
+    assert isinstance(descriptor, property)
+    assert descriptor.fset is not None
+    assert descriptor.fdel is not None
+    assert "return 99" not in source
+
+
 def test_retry_copies_tests_and_reports_an_isolated_test_command(tmp_path: Path) -> None:
     directory = make_problem(tmp_path, "ts", "0001", "one")
     test_path = directory / "p_0001_one.test.ts"
@@ -683,6 +754,31 @@ def test_retry_preserves_combined_default_and_named_typescript_imports(
     assert "export function helper(value: number): number" in source
     assert "return value + 99" not in source
     assert "return value + 98" not in source
+
+
+def test_retry_preserves_declaration_level_typescript_type_imports(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0270",
+        "typed_case",
+        source=(
+            "export interface Case { value: number }\n"
+            "export function solve(item: number): number { return item + 99; }\n"
+        ),
+    )
+    (directory / "p_0270_typed_case.test.ts").write_text(
+        'import type { Case } from "./p_0270_typed_case.js";\n'
+        'import { solve } from "./p_0270_typed_case.js";\n'
+        "const item: Case = { value: 1 };\n"
+        'test("typed", () => expect(solve(item.value)).toBe(1));\n',
+        encoding="utf-8",
+    )
+
+    source = retry(tmp_path, "0270").path.read_text(encoding="utf-8")
+
+    assert source.count("export interface Case") == 1
+    assert "export function solve(item: number): number" in source
 
 
 def test_retry_preserves_type_declarations_referenced_by_function_signatures(

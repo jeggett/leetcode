@@ -1597,6 +1597,9 @@ def _typescript_referenced_type_declarations(source: str, rendered: str) -> list
     """Return transitive file-local type and class declarations used by a retry interface."""
 
     declarations = _typescript_type_declarations(source)
+    declared_types = {
+        match["name"] for match in TS_TYPE_DECLARATION_START_PATTERN.finditer(rendered)
+    }
     classes = {match["name"]: match for match in TS_CLASS_PATTERN.finditer(source)}
     declared_classes = {match["name"] for match in TS_CLASS_PATTERN.finditer(rendered)}
     identifiers = set(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", rendered))
@@ -1606,7 +1609,7 @@ def _typescript_referenced_type_declarations(source: str, rendered: str) -> list
     while changed:
         changed = False
         for name, declaration in declarations.items():
-            if name not in identifiers or name in selected:
+            if name not in identifiers or name in declared_types or name in selected:
                 continue
             selected.add(name)
             identifiers.update(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", declaration))
@@ -1871,6 +1874,7 @@ def _typescript_imported_bindings(problem: Problem) -> tuple[tuple[str, str], ..
             spec = pending_specs.pop(0)
             if not spec:
                 continue
+            spec = re.sub(r"^type\s+", "", spec, count=1)
             if spec.startswith("{"):
                 close = spec.rfind("}")
                 if close == -1:
@@ -1986,6 +1990,7 @@ def _typescript_retry_exports(
 
     functions = _typescript_function_signatures(source)
     classes = {match["name"]: match for match in TS_CLASS_PATTERN.finditer(source)}
+    type_declarations = _typescript_type_declarations(source)
     declarations = {
         match["name"]: match["kind"] for match in TS_EXPORT_DECLARATION_PATTERN.finditer(source)
     }
@@ -2028,6 +2033,9 @@ def _typescript_retry_exports(
         elif name in functions:
             rendered.append(_typescript_function_retry_source(functions[name]))
             continue
+        elif name in type_declarations:
+            rendered.append(type_declarations[name])
+            continue
         if name in declarations:
             kind = declarations[name]
             raise PracticeError(
@@ -2058,32 +2066,81 @@ def _python_method_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> st
     return " ".join(signature.split())
 
 
+def _python_dataclass_decorator(class_node: ast.ClassDef) -> str | None:
+    """Return a normalized standard-library dataclass decorator when present."""
+
+    for decorator in class_node.decorator_list:
+        function = decorator.func if isinstance(decorator, ast.Call) else decorator
+        is_dataclass = (
+            isinstance(function, ast.Name)
+            and function.id == "dataclass"
+            or isinstance(function, ast.Attribute)
+            and isinstance(function.value, ast.Name)
+            and function.value.id == "dataclasses"
+            and function.attr == "dataclass"
+        )
+        if not is_dataclass:
+            continue
+        if not isinstance(decorator, ast.Call):
+            return "dataclass"
+        arguments = [ast.unparse(argument) for argument in decorator.args]
+        arguments.extend(
+            f"{keyword.arg}={ast.unparse(keyword.value)}"
+            for keyword in decorator.keywords
+            if keyword.arg is not None
+        )
+        return f"dataclass({', '.join(arguments)})"
+    return None
+
+
+def _python_dataclass_fields(class_node: ast.ClassDef) -> list[str]:
+    """Render annotated dataclass fields that define its generated constructor."""
+
+    rendered: list[str] = []
+    for node in class_node.body:
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        declaration = f"{node.target.id}: {ast.unparse(node.annotation)}"
+        if node.value is not None:
+            declaration += f" = {ast.unparse(node.value)}"
+        rendered.append(declaration)
+    return rendered
+
+
 def _python_class_retry_source(
     source: str,
     class_node: ast.ClassDef,
     *,
     include_prelude: bool = True,
+    include_dataclass_import: bool = False,
 ) -> str:
     """Render a blank Python class/design retry with its constructor and public methods."""
 
+    dataclass_decorator = _python_dataclass_decorator(class_node)
+    dataclass_fields = _python_dataclass_fields(class_node) if dataclass_decorator else []
     rendered = []
     if include_prelude:
         rendered.extend(
             [
                 '"""Blank interview retry artifact; accepted solution body omitted."""',
                 "from __future__ import annotations",
-                "",
-                "",
             ]
         )
+        if dataclass_decorator or include_dataclass_import:
+            rendered.extend(["import dataclasses", "from dataclasses import dataclass, field"])
+        rendered.extend(["", ""])
+    if dataclass_decorator:
+        rendered.append(f"@{dataclass_decorator}")
     rendered.append(f"class {class_node.name}:")
+    for declaration in dataclass_fields:
+        rendered.append(f"    {declaration}")
     methods = [
         node
         for node in class_node.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
         and (node.name == "__init__" or not node.name.startswith("_"))
     ]
-    if not methods:
+    if not dataclass_fields and not methods:
         rendered.append("    pass")
         return "\n".join(rendered) + "\n"
     for method in methods:
@@ -2091,7 +2148,13 @@ def _python_class_retry_source(
         # user decorators or implementation helpers into an isolated retry.
         for decorator in method.decorator_list:
             decorator_text = ast.unparse(decorator)
-            if decorator_text in {"classmethod", "staticmethod", "property"}:
+            if decorator_text in {
+                "classmethod",
+                "staticmethod",
+                "property",
+                f"{method.name}.setter",
+                f"{method.name}.deleter",
+            }:
                 rendered.append(f"    @{decorator_text}")
         rendered.append(f"    {_python_method_signature(method)}:")
         if method.name == "__init__":
@@ -2219,11 +2282,15 @@ def _python_retry_source(problem: Problem) -> str:
         [available_classes[name] for name in imported_class_names] if available_classes else []
     )
     if source is not None and imported_classes:
+        needs_dataclass_import = any(
+            _python_dataclass_decorator(class_node) is not None for class_node in imported_classes
+        )
         return "\n".join(
             _python_class_retry_source(
                 source,
                 class_node,
                 include_prelude=index == 0,
+                include_dataclass_import=index == 0 and needs_dataclass_import,
             )
             for index, class_node in enumerate(imported_classes)
         )
