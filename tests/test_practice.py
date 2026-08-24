@@ -171,6 +171,43 @@ def test_finish_persists_history_clears_active_and_computes_elapsed(tmp_path: Pa
     assert json.loads(line)["result"] == "solved"
 
 
+def test_finish_retry_does_not_append_a_session_twice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    session = start(tmp_path, "0001", now=BASE_TIME)
+    original_clear_active = PracticeStore.clear_active
+    clear_attempts = 0
+
+    def fail_first_clear(store: PracticeStore) -> None:
+        nonlocal clear_attempts
+        clear_attempts += 1
+        if clear_attempts == 1:
+            raise PracticeStateError("simulated cleanup failure")
+        original_clear_active(store)
+
+    monkeypatch.setattr(PracticeStore, "clear_active", fail_first_clear)
+
+    with pytest.raises(PracticeStateError, match="simulated cleanup failure"):
+        finish(tmp_path, "solved", 4, now=BASE_TIME, session_id=session.session_id)
+    retried = finish(tmp_path, "solved", 4, now=BASE_TIME, session_id=session.session_id)
+
+    store = PracticeStore(tmp_path)
+    assert store.read_active() is None
+    assert store.read_history() == [retried]
+
+
+def test_finish_with_session_id_is_idempotent_after_success(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    session = start(tmp_path, "0001", now=BASE_TIME)
+
+    first = finish(tmp_path, "solved", 4, now=BASE_TIME, session_id=session.session_id)
+    second = finish(tmp_path, "solved", 4, now=BASE_TIME, session_id=session.session_id)
+
+    assert second == first
+    assert PracticeStore(tmp_path).read_history() == [first]
+
+
 def test_finish_rejects_invalid_confidence_and_missing_session(tmp_path: Path) -> None:
     with pytest.raises(PracticeStateError, match="no active"):
         finish(tmp_path, "failed", 1)

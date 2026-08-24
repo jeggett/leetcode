@@ -9,7 +9,7 @@
       "runtimeArgs": ["exec", "--", "node"],
       "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
       "args": ["run", "${fileDirname}"],
-      "cwd": "${fileDirname}",
+      "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "autoAttachChildProcesses": true,
       "smartStep": true,

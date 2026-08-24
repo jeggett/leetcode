@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import fcntl
 import json
 import math
 import os
@@ -46,7 +47,8 @@ import sys
 import tomllib
 import uuid
 from collections import Counter
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
@@ -62,6 +64,7 @@ STATE_DIRECTORY_NAME = ".lc"
 HISTORY_FILE_NAME = "practice-history.jsonl"
 ACTIVE_FILE_NAME = "practice-active.json"
 ATTEMPT_DIRECTORY_NAME = "practice-attempts"
+FINISH_LOCK_FILE_NAME = "practice-finish.lock"
 TRACK_FILE_NAME = "interview-core.toml"
 
 LANGUAGE_DIRECTORIES = {"ts": "typescript", "py": "python"}
@@ -908,6 +911,7 @@ class PracticeStore:
         self.history_path = self.state_dir / HISTORY_FILE_NAME
         self.active_path = self.state_dir / ACTIVE_FILE_NAME
         self.attempts_dir = self.state_dir / ATTEMPT_DIRECTORY_NAME
+        self.finish_lock_path = self.state_dir / FINISH_LOCK_FILE_NAME
         self.history_file = self.history_path
         self.active_file = self.active_path
 
@@ -956,6 +960,28 @@ class PracticeStore:
                 stream.write(json.dumps(record.to_dict(), sort_keys=True) + "\n")
         except OSError as error:
             raise PracticeStateError(f"could not append practice history: {error}") from error
+
+    @contextmanager
+    def finish_transaction(self) -> Iterator[None]:
+        """Serialize the read, append, and active-session cleanup performed by ``finish``."""
+
+        self._ensure_state_dir()
+        try:
+            stream = self.finish_lock_path.open("a+", encoding="utf-8")
+        except OSError as error:
+            raise PracticeStateError(f"could not open practice finish lock: {error}") from error
+        with stream:
+            try:
+                fcntl.flock(stream, fcntl.LOCK_EX)
+            except OSError as error:
+                raise PracticeStateError(f"could not lock practice session: {error}") from error
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(stream, fcntl.LOCK_UN)
+                except OSError:
+                    pass
 
     def read_active(self) -> Session | None:
         """Return the active session, or ``None`` when no session is active."""
@@ -1233,45 +1259,56 @@ def finish(
     validated_result = _validate_result(result)
     validated_confidence = _validate_confidence(confidence)
     store = PracticeStore(root)
-    session = store.read_active()
-    if session is None:
-        raise PracticeStateError("no active practice session")
-    if session_id is not None and session.session_id != session_id:
-        raise PracticeStateError("session ID does not match the active session")
-    finished_at = _utc(now)
-    computed_elapsed = (finished_at - session.started_at).total_seconds()
-    elapsed_value = computed_elapsed if provided_elapsed is None else provided_elapsed
-    if not math.isfinite(elapsed_value) or elapsed_value < 0:
-        raise PracticeError("finish time cannot precede session start")
-    if notes is not None and not isinstance(notes, str):
-        raise PracticeError("notes must be a string")
-    previous_records = [
-        record
-        for record in store.read_history()
-        if record.language == session.language and record.problem_id == session.problem_id
-    ]
-    record = PracticeRecord(
-        record_id=uuid.uuid4().hex,
-        session_id=session.session_id,
-        problem_id=session.problem_id,
-        language=session.language,
-        mode=session.mode,
-        result=validated_result,
-        confidence=validated_confidence,
-        elapsed_seconds=elapsed_value,
-        started_at=session.started_at,
-        finished_at=finished_at,
-        due_at=progressive_due_at(
-            finished_at,
-            validated_result,
-            validated_confidence,
-            previous_records,
-        ),
-        notes=notes,
-    )
-    store.append_record(record)
-    store.clear_active()
-    return record
+    with store.finish_transaction():
+        history = store.read_history()
+        session = store.read_active()
+        if session is None:
+            existing = next((record for record in history if record.session_id == session_id), None)
+            if existing is not None:
+                return existing
+            raise PracticeStateError("no active practice session")
+        if session_id is not None and session.session_id != session_id:
+            raise PracticeStateError("session ID does not match the active session")
+        existing = next(
+            (record for record in history if record.session_id == session.session_id), None
+        )
+        if existing is not None:
+            store.clear_active()
+            return existing
+        finished_at = _utc(now)
+        computed_elapsed = (finished_at - session.started_at).total_seconds()
+        elapsed_value = computed_elapsed if provided_elapsed is None else provided_elapsed
+        if not math.isfinite(elapsed_value) or elapsed_value < 0:
+            raise PracticeError("finish time cannot precede session start")
+        if notes is not None and not isinstance(notes, str):
+            raise PracticeError("notes must be a string")
+        previous_records = [
+            record
+            for record in history
+            if record.language == session.language and record.problem_id == session.problem_id
+        ]
+        record = PracticeRecord(
+            record_id=uuid.uuid4().hex,
+            session_id=session.session_id,
+            problem_id=session.problem_id,
+            language=session.language,
+            mode=session.mode,
+            result=validated_result,
+            confidence=validated_confidence,
+            elapsed_seconds=elapsed_value,
+            started_at=session.started_at,
+            finished_at=finished_at,
+            due_at=progressive_due_at(
+                finished_at,
+                validated_result,
+                validated_confidence,
+                previous_records,
+            ),
+            notes=notes,
+        )
+        store.append_record(record)
+        store.clear_active()
+        return record
 
 
 def review(

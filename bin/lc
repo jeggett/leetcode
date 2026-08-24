@@ -9,22 +9,28 @@ CALLER_DIRECTORY=$(pwd -P)
 # Help and diagnostics must remain available while mise.toml is untrusted or
 # the pinned tools have not been installed yet. Keep these branches before
 # every mise invocation; all normal project commands still use mise below.
-DIRECT_PYTHON=python
-if ! command -v "$DIRECT_PYTHON" >/dev/null 2>&1; then
-    DIRECT_PYTHON=python3
-fi
+exec_direct_python() {
+    for candidate in python python3 /usr/bin/python3; do
+        if "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 14))' \
+            >/dev/null 2>&1; then
+            LC_CALLER_CWD=$CALLER_DIRECTORY exec "$candidate" "$@"
+        fi
+    done
+    echo "lc: Python 3.14 or newer is required; run ./bin/setup --trust" >&2
+    exit 127
+}
 
 for argument in "$@"; do
     case "$argument" in
         -h|--help)
-            LC_CALLER_CWD=$CALLER_DIRECTORY exec "$DIRECT_PYTHON" "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+            exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
             ;;
     esac
 done
 
 case "${1-}" in
     ""|help)
-        LC_CALLER_CWD=$CALLER_DIRECTORY exec "$DIRECT_PYTHON" "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+        exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
         ;;
     doctor|d)
         # Doctor is the bootstrap path: never let its diagnostics trigger mise's
@@ -35,7 +41,7 @@ case "${1-}" in
             exec env MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- \
                 python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
         fi
-        exec "$DIRECT_PYTHON" "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+        exec_direct_python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
         ;;
 esac
 
