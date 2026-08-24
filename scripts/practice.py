@@ -1124,6 +1124,7 @@ def select_today(
     *,
     limit: int = 1,
     now: datetime | date | None = None,
+    track_path: Path | str | None = None,
 ) -> list[Problem]:
     """Select due problems first, then unseen problems, up to ``limit`` items."""
 
@@ -1137,7 +1138,7 @@ def select_today(
     records = _filtered_records(store, language)
     statuses = [
         _problem_status(problem, records, current)
-        for problem in discover_problems(repository_root, discovery_language)
+        for problem in discover_problems(repository_root, discovery_language, track_path=track_path)
     ]
     due = sorted(
         (status for status in statuses if status.state == "due"),
@@ -1219,7 +1220,13 @@ def start_in_transaction(
     canonical_language = normalize_language(language)
     current = _utc(now)
     if problem_id is None:
-        candidates = select_today(repository_root, canonical_language, limit=1, now=current)
+        candidates = select_today(
+            repository_root,
+            canonical_language,
+            limit=1,
+            now=current,
+            track_path=track_path,
+        )
         if not candidates:
             raise PracticeError("no due or unseen problems are available")
         problem = candidates[0]
@@ -2076,6 +2083,36 @@ def _python_self_contained_default(value: ast.expr) -> bool:
     )
 
 
+def _python_dataclass_default_is_safe(value: ast.expr) -> bool:
+    """Allow literals and isolated standard dataclass field factories."""
+
+    if _python_self_contained_default(value):
+        return True
+    if not isinstance(value, ast.Call):
+        return False
+    function = value.func
+    is_field = (
+        isinstance(function, ast.Name)
+        and function.id == "field"
+        or (
+            isinstance(function, ast.Attribute)
+            and isinstance(function.value, ast.Name)
+            and function.value.id == "dataclasses"
+            and function.attr == "field"
+        )
+    )
+    if not is_field or any(not _python_self_contained_default(item) for item in value.args):
+        return False
+    builtin_factories = {"dict", "frozenset", "list", "set", "tuple"}
+    return all(
+        keyword.arg == "default_factory"
+        and isinstance(keyword.value, ast.Name)
+        and keyword.value.id in builtin_factories
+        or _python_self_contained_default(keyword.value)
+        for keyword in value.keywords
+    )
+
+
 def _python_method_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     """Render a Python function header from its AST while omitting its body."""
 
@@ -2137,7 +2174,7 @@ def _python_dataclass_fields(class_node: ast.ClassDef) -> list[str]:
         if node.value is not None:
             value = (
                 node.value
-                if _python_self_contained_default(node.value)
+                if _python_dataclass_default_is_safe(node.value)
                 else ast.Constant(value=Ellipsis)
             )
             declaration += f" = {ast.unparse(value)}"
@@ -2215,11 +2252,21 @@ def _python_imported_class_names(problem: Problem) -> tuple[str, ...]:
     source_stem = problem.source_path.stem
     names: list[str] = []
     for node in test_module.body:
-        if not isinstance(node, ast.ImportFrom) or not node.module:
-            continue
-        if node.module.rsplit(".", 1)[-1] != source_stem:
-            continue
-        names.extend(alias.name for alias in node.names if alias.name != "*")
+        if isinstance(node, ast.ImportFrom) and node.module:
+            if node.module.rsplit(".", 1)[-1] == source_stem:
+                names.extend(alias.name for alias in node.names if alias.name != "*")
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.rsplit(".", 1)[-1] != source_stem:
+                    continue
+                binding = alias.asname or alias.name.split(".", 1)[0]
+                names.extend(
+                    item.attr
+                    for item in ast.walk(test_module)
+                    if isinstance(item, ast.Attribute)
+                    and isinstance(item.value, ast.Name)
+                    and item.value.id == binding
+                )
     return tuple(dict.fromkeys(names))
 
 

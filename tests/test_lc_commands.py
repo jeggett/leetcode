@@ -426,6 +426,32 @@ def test_start_url_repeat_uses_tracked_url_when_title_slug_differs(tmp_path: Pat
     assert repeated.created is False
 
 
+def test_start_url_repeat_reads_nested_metadata_with_dirty_solution(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+    created = lc.start_problem(tmp_path, "ts", PROBLEM_URL, fetch=lambda _language, _url: problem)
+    (created.directory / "problem.toml").write_text(
+        f'[problem]\nid = "0035"\nurl = "{PROBLEM_URL}"\n', encoding="utf-8"
+    )
+    created.source_path.write_text("// dirty solution\n", encoding="utf-8")
+
+    repeated = lc.start_problem(
+        tmp_path,
+        None,
+        PROBLEM_URL,
+        fetch=lambda *_args: pytest.fail("repeat should use nested tracked URL metadata"),
+    )
+
+    assert repeated.directory == created.directory
+    assert repeated.created is False
+
+
 def test_legacy_url_scaffold_rejects_a_different_active_timer(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     problem = lc.ProblemMetadata(

@@ -1128,11 +1128,17 @@ def _existing_problem_for_url(
                 continue
             try:
                 document = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
+                values = document
+                for table_name in ("problem", "metadata"):
+                    table = document.get(table_name)
+                    if isinstance(table, dict):
+                        values = {**document, **table}
+                        break
                 problem_id = _normalized_problem_id(directory_match["problem_id"])
-                metadata_id = _normalized_problem_id(str(document.get("id", "")))
+                metadata_id = _normalized_problem_id(str(values.get("id", "")))
             except LcUsageError, OSError, UnicodeError, tomllib.TOMLDecodeError:
                 continue
-            if metadata_id != problem_id or document.get("url") != canonical_url:
+            if metadata_id != problem_id or values.get("url") != canonical_url:
                 continue
             source_path, test_path = _problem_file_paths(directory, selected_language)
             if source_path.is_file() and test_path.is_file():

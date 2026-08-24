@@ -179,6 +179,21 @@ def test_today_prefers_due_then_unseen_and_start_infers_mode(tmp_path: Path) -> 
         start(tmp_path, "0003", now=BASE_TIME + timedelta(minutes=22))
 
 
+def test_start_automatic_selection_uses_custom_track(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "0001", "first")
+    make_problem(tmp_path, "ts", "0002", "second")
+    track = tmp_path / "custom-track.toml"
+    track.write_text(
+        '[[problems]]\nid = "0001"\ntarget_minutes = 30\n'
+        '[[problems]]\nid = "0002"\ntarget_minutes = 5\n',
+        encoding="utf-8",
+    )
+
+    session = start(tmp_path, track_path=track, now=BASE_TIME)
+
+    assert session.problem_id == "0002"
+
+
 def test_finish_persists_history_clears_active_and_computes_elapsed(tmp_path: Path) -> None:
     session = (
         start(tmp_path, "0001", now=BASE_TIME)
@@ -582,6 +597,35 @@ def test_retry_recreates_every_python_class_imported_by_the_test(tmp_path: Path)
     assert "return str(root.value)" not in source
 
 
+def test_retry_recreates_classes_used_through_python_module_import(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0296",
+        "module_codec",
+        source=(
+            "class TreeNode:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n\n"
+            "class Codec:\n"
+            "    def serialize(self, root: TreeNode) -> str:\n"
+            "        return str(root.value)\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "test_p_0296_module_codec.py").write_text(
+        "import p_0296_module_codec as solution\n"
+        "node = solution.TreeNode(1)\n"
+        "codec = solution.Codec()\n",
+        encoding="utf-8",
+    )
+
+    source = retry(tmp_path, "0296", "py").path.read_text(encoding="utf-8")
+
+    assert "class TreeNode:" in source
+    assert "class Codec:" in source
+
+
 def test_retry_rejects_unsupported_python_solution_imports_before_writing(
     tmp_path: Path,
 ) -> None:
@@ -681,6 +725,33 @@ def test_retry_replaces_unresolved_python_dataclass_defaults(tmp_path: Path) -> 
     exec(source, namespace)
 
     assert "value: int = ..." in source
+
+
+def test_retry_preserves_builtin_dataclass_default_factories(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0303",
+        "dataclass_factory",
+        source=(
+            "from dataclasses import dataclass, field\n\n"
+            "@dataclass\n"
+            "class Node:\n"
+            "    children: list[int] = field(default_factory=list)\n"
+        ),
+    )
+    (directory / "test_p_0303_dataclass_factory.py").write_text(
+        "from p_0303_dataclass_factory import Node\n", encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0303", "py").path.read_text(encoding="utf-8")
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+    node = namespace["Node"]()
+    node.children.append(1)
+
+    assert "field(default_factory=list)" in source
+    assert node.children == [1]
 
 
 def test_retry_preserves_python_property_setter_and_deleter(tmp_path: Path) -> None:
