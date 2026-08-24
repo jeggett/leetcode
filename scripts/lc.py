@@ -1340,41 +1340,53 @@ def start_problem(
                 )
         else:
             current = _switch_branch(root, current, target_branch, run)
-            existing = _existing_problem_directory(
-                root, problem_id, requested_language or selected_language
-            )
-            if existing is not None:
-                selected_language, directory = existing
-                _require_compatible_practice_session(active_session, problem_id, selected_language)
-                return _lifecycle_result(
-                    selected_language,
-                    problem_id,
-                    directory,
-                    current,
-                    metadata=metadata,
-                )
-            if metadata is None:
-                raise LeetError(
-                    f"branch {target_branch} has no local problem directory for ID {problem_id}"
-                )
-            # A branch can exist after an interrupted scaffold.  Complete its
-            # files in place instead of making a second branch.
-            if selected_language is None:
-                raise LeetError("could not determine the problem language")
-            directory = build_paths(root, selected_language, problem_id, slugify(metadata.title))[0]
-            _require_new_problem(root, selected_language, metadata)
             try:
-                source_path, test_path, _ = creator(
-                    root,
-                    selected_language,
-                    metadata.problem_id,
-                    [metadata.title],
-                    metadata.canonical_url,
-                    metadata.signature,
-                    details=_problem_details(metadata),
+                existing = _existing_problem_directory(
+                    root, problem_id, requested_language or selected_language
                 )
+                if existing is not None:
+                    selected_language, directory = existing
+                    _require_compatible_practice_session(
+                        active_session, problem_id, selected_language
+                    )
+                    return _lifecycle_result(
+                        selected_language,
+                        problem_id,
+                        directory,
+                        current,
+                        metadata=metadata,
+                    )
+                if metadata is None:
+                    raise LeetError(
+                        f"branch {target_branch} has no local problem directory for ID {problem_id}"
+                    )
+                # A branch can exist after an interrupted scaffold.  Complete its
+                # files in place instead of making a second branch.
+                if selected_language is None:
+                    raise LeetError("could not determine the problem language")
+                directory = build_paths(
+                    root, selected_language, problem_id, slugify(metadata.title)
+                )[0]
+                _require_new_problem(root, selected_language, metadata)
+                try:
+                    source_path, test_path, _ = creator(
+                        root,
+                        selected_language,
+                        metadata.problem_id,
+                        [metadata.title],
+                        metadata.canonical_url,
+                        metadata.signature,
+                        details=_problem_details(metadata),
+                    )
+                except (LeetError, ScaffoldError, OSError) as error:
+                    raise LeetError(f"could not create scaffold: {error}") from error
             except (LeetError, ScaffoldError, OSError) as error:
-                raise LeetError(f"could not create scaffold: {error}") from error
+                if current != original_branch:
+                    restored = run(("git", "switch", original_branch), root)
+                    if restored.returncode != 0:
+                        restore_error = _git_error(f"restore branch {original_branch!r}", restored)
+                        raise LeetError(f"{error}; {restore_error}") from error
+                raise
             return LifecycleResult(
                 selected_language,
                 problem_id,

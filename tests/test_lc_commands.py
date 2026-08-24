@@ -242,6 +242,22 @@ def test_start_restores_original_branch_when_base_validation_fails(tmp_path: Pat
     assert ("git", "switch", original_branch) in git.calls
 
 
+def test_start_restores_original_branch_when_existing_target_is_incomplete(
+    tmp_path: Path,
+) -> None:
+    original_branch = "feature/current-work"
+    target_branch = "feat/p-0035-search-insert-position"
+    git = LifecycleGit(tmp_path, branch=original_branch)
+    git.branches.add(target_branch)
+
+    with pytest.raises(lc.LeetError, match="has no local problem directory"):
+        lc.start_problem(tmp_path, None, "35", run=git)
+
+    assert git.branch == original_branch
+    assert ("git", "switch", target_branch) in git.calls
+    assert ("git", "switch", original_branch) in git.calls
+
+
 def test_start_is_repeatable_with_real_untracked_scaffold_files(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     problem = lc.ProblemMetadata(

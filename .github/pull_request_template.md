@@ -21,5 +21,5 @@
 
 ## Validation
 
-- [ ] `lc ready --current`
+- [ ] `lc ready`
 - [ ] `lc compat` when TypeScript syntax or APIs changed

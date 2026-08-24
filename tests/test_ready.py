@@ -13,6 +13,7 @@ from scripts.ready import (
     run_problem_gate,
     run_staged_gate,
     staged_paths,
+    validate_all_problem_metadata,
     validate_problem_metadata,
 )
 from scripts.problem_paths import resolve_problem_paths
@@ -172,6 +173,17 @@ def test_problem_gate_accepts_consistent_metadata(tmp_path: Path) -> None:
     run_problem_gate(tmp_path, paths, run=run)
 
     assert len(calls) == 4
+
+
+def test_full_metadata_validation_checks_every_problem(tmp_path: Path) -> None:
+    make_problem(
+        tmp_path,
+        "ts",
+        metadata='id = "0002"\nlanguage = "ts"\nkind = "function"\n',
+    )
+
+    with pytest.raises(ReadyError, match="does not match problem 0001"):
+        validate_all_problem_metadata(tmp_path)
 
 
 def test_staged_paths_include_deletions_but_not_unstaged_or_untracked(tmp_path: Path) -> None:

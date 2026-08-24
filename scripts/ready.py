@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import sys
 import tempfile
@@ -140,6 +141,25 @@ def validate_problem_metadata(paths: ProblemPaths) -> None:
 
     if problems:
         raise ReadyError(f"invalid metadata {metadata_path}:\n" + "\n".join(problems))
+
+
+def validate_all_problem_metadata(root: Path) -> None:
+    """Validate metadata for every conventional problem in the repository."""
+
+    directory_pattern = re.compile(r"^p_(?P<problem_id>[0-9]+)_[a-z0-9][a-z0-9_]*$")
+    for language, directory_name in (("py", "python"), ("ts", "typescript")):
+        language_root = root / "src" / directory_name
+        if not language_root.is_dir():
+            continue
+        for directory in sorted(language_root.iterdir()):
+            match = directory_pattern.fullmatch(directory.name)
+            if match is None or not directory.is_dir():
+                continue
+            try:
+                problem_id = normalize_problem_id(match["problem_id"])
+            except ProblemPathError as error:
+                raise ReadyError(f"invalid problem directory {directory}: {error}") from error
+            validate_problem_metadata(ProblemPaths(language, problem_id, directory))
 
 
 def _git_error(result: CommandResult, fallback: str) -> ReadyError:
@@ -419,10 +439,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_staged_gate(root)
         elif arguments == ["all"]:
             run_full_gate(root)
+        elif arguments == ["metadata"]:
+            validate_all_problem_metadata(root)
         elif len(arguments) == 3 and arguments[0] == "current":
             run_problem_gate(root, resolve_problem_paths(root, arguments[1], arguments[2]))
         else:
-            raise ReadyError("usage: ready.py current <py|ts> <ID> | changed | staged | all")
+            raise ReadyError(
+                "usage: ready.py current <py|ts> <ID> | changed | staged | metadata | all"
+            )
     except (OSError, ProblemPathError, ReadyError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2 if str(error).startswith("usage:") else 1
