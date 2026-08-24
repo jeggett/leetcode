@@ -195,6 +195,10 @@ def test_start_uses_main_and_repeats_idempotently(tmp_path: Path) -> None:
         test = directory / "p_0035_search_insert_position.test.ts"
         source.write_text("", encoding="utf-8")
         test.write_text("", encoding="utf-8")
+        (directory / "problem.toml").write_text(
+            f'id = "0035"\nurl = "{PROBLEM_URL}"\n',
+            encoding="utf-8",
+        )
         return source, test, "feat/p-0035-search-insert-position"
 
     result = lc.start_problem(
@@ -363,6 +367,64 @@ def test_no_branch_start_is_repeatable_with_dirty_scaffold_files(tmp_path: Path)
     assert repeated.created is False
     assert repeated.directory == created.directory
     assert branch.stdout.strip() == "main"
+
+
+def test_start_url_repeat_uses_tracked_url_when_title_slug_differs(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Placement",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+
+    created = lc.start_problem(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda _language, _url: problem,
+    )
+    repeated = lc.start_problem(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda *_args: pytest.fail("repeat should use tracked URL metadata"),
+    )
+
+    assert created.branch == "feat/p-0035-search-placement"
+    assert repeated.directory == created.directory
+    assert repeated.created is False
+
+
+def test_legacy_url_scaffold_rejects_a_different_active_timer(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+    active = lc.Session("active", "0099", "ts", "new", datetime.now(UTC))
+
+    with pytest.raises(lc.LeetError, match="0099.*already active"):
+        lc.scaffold_from_url(
+            tmp_path,
+            "ts",
+            PROBLEM_URL,
+            fetch=lambda _language, _url: problem,
+            active_session=active,
+        )
+
+    branch = subprocess.run(
+        ("git", "branch", "--show-current"),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    assert branch == "main"
 
 
 def test_no_branch_id_start_is_repeatable_with_dirty_solution(tmp_path: Path) -> None:
@@ -884,7 +946,13 @@ def test_main_preserves_url_scaffolding_and_delegates_manual_new(
     scaffold_calls: list[tuple[Path, str, str]] = []
     manual_calls: list[tuple[tuple[str, ...], Path]] = []
 
-    def scaffold(root_arg: Path, language: str, url: str) -> lc.ScaffoldResult:
+    def scaffold(
+        root_arg: Path,
+        language: str,
+        url: str,
+        **options: object,
+    ) -> lc.ScaffoldResult:
+        assert options["active_session"] is None
         scaffold_calls.append((root_arg, language, url))
         metadata = lc.ProblemMetadata(
             "0035", "Search Insert Position", "search-insert-position", url, "solve(): number"
@@ -1024,6 +1092,78 @@ def test_main_holds_session_transaction_across_lifecycle_and_timer(
     monkeypatch.setattr(lc, "_ensure_practice_session", ensure)
 
     assert lc.main(["start", "35"]) == 0
+    assert locked is False
+
+
+@pytest.mark.parametrize("arguments", [("resume", "35"), (PROBLEM_URL,)])
+def test_main_holds_session_transaction_across_other_branch_lifecycles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: tuple[str, ...],
+) -> None:
+    root = tmp_path / "repository"
+    scripts = root / "scripts"
+    directory = root / "src/typescript/p_0035_search_insert_position"
+    scripts.mkdir(parents=True)
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(lc, "__file__", str(scripts / "lc.py"))
+    locked = False
+    active = lc.Session("session", "0035", "ts", "new", datetime.now(UTC))
+
+    class Transaction:
+        def __enter__(self) -> None:
+            nonlocal locked
+            locked = True
+
+        def __exit__(self, *_args: object) -> None:
+            nonlocal locked
+            locked = False
+
+    class Store:
+        def session_transaction(self) -> Transaction:
+            return Transaction()
+
+        def read_active(self) -> lc.Session:
+            assert locked
+            return active
+
+    store = Store()
+    lifecycle_result = lc.LifecycleResult(
+        "ts",
+        "0035",
+        directory,
+        directory / f"{directory.name}.ts",
+        directory / f"{directory.name}.test.ts",
+        "feat/p-0035-search-insert-position",
+    )
+    metadata = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+
+    def resume(*_args: object, **options: object) -> lc.LifecycleResult:
+        assert locked
+        assert options["active_session"] == active
+        return lifecycle_result
+
+    def scaffold(*_args: object, **options: object) -> lc.ScaffoldResult:
+        assert locked
+        assert options["active_session"] == active
+        return lc.ScaffoldResult(
+            metadata,
+            lifecycle_result.source_path,
+            lifecycle_result.test_path,
+            lifecycle_result.branch,
+        )
+
+    monkeypatch.setattr(lc, "PracticeStore", lambda _root: store)
+    monkeypatch.setattr(lc, "resume_problem", resume)
+    monkeypatch.setattr(lc, "scaffold_from_url", scaffold)
+
+    assert lc.main(list(arguments)) == 0
     assert locked is False
 
 

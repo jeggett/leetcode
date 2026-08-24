@@ -468,6 +468,52 @@ class MinStack:
     assert "MinStack" in py_attempt.test_path.read_text(encoding="utf-8")
 
 
+def test_retry_recreates_every_python_class_imported_by_the_test(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0297",
+        "codec",
+        source=(
+            "class TreeNode:\n"
+            "    def __init__(self, value: int) -> None:\n"
+            "        self.value = value\n\n\n"
+            "class Codec:\n"
+            "    def serialize(self, root: TreeNode) -> str:\n"
+            "        return str(root.value)\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "test_p_0297_codec.py").write_text(
+        "from p_0297_codec import Codec, TreeNode\n",
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0297", "py")
+    source = attempt.path.read_text(encoding="utf-8")
+
+    assert "class Codec:" in source
+    assert "class TreeNode:" in source
+    assert source.count("from __future__ import annotations") == 1
+    assert "return str(root.value)" not in source
+
+
+def test_retry_rejects_colocated_python_test_dependencies_before_writing(
+    tmp_path: Path,
+) -> None:
+    directory = make_problem(tmp_path, "py", "0298", "local_helper")
+    (directory / "helper.py").write_text("def make_value(): return 1\n", encoding="utf-8")
+    (directory / "test_p_0298_local_helper.py").write_text(
+        "from helper import make_value\nfrom p_0298_local_helper import Solution\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PracticeError, match="colocated Python import.*helper.py"):
+        retry(tmp_path, "0298", "py")
+
+    assert not (tmp_path / ".lc/practice-attempts").exists()
+
+
 def test_retry_copies_tests_and_reports_an_isolated_test_command(tmp_path: Path) -> None:
     directory = make_problem(tmp_path, "ts", "0001", "one")
     test_path = directory / "p_0001_one.test.ts"

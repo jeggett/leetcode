@@ -563,7 +563,7 @@ def test_parses_concise_command_and_prints_success(
     monkeypatch.setattr(
         lc,
         "scaffold_from_url",
-        lambda *_arguments: ScaffoldResult(
+        lambda *_arguments, **_options: ScaffoldResult(
             metadata(), source, test, "feat/p-0035-search-insert-position"
         ),
     )

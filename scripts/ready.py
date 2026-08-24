@@ -365,6 +365,12 @@ def run_changed_gate(
 ) -> None:
     """Check changed problems, falling back to the full gate for tooling changes."""
     paths = changed_paths(root, git_run=git_run)
+    if not paths:
+        # A clean feature branch may contain only committed changes relative to
+        # its base.  Without a reliable merge-base in every local checkout,
+        # the safe fallback is the complete gate rather than a false no-op.
+        run_full_gate(root, run=run)
+        return
     keys, requires_full = changed_problem_keys(paths)
     if requires_full:
         run_full_gate(root, run=run)

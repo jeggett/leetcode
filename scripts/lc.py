@@ -703,11 +703,13 @@ def scaffold_from_url(
     fetch: ProblemFetcher = fetch_problem_metadata,
     run: GitRunner = run_command,
     creator: ProblemCreator = create_problem,
+    active_session: Session | None = None,
 ) -> ScaffoldResult:
     """Fetch, branch, and scaffold one problem as a single guarded workflow."""
     canonical_url, _ = canonicalize_problem_url(value)
     original_branch = preflight_git(root, run)
     metadata = fetch(language, canonical_url)
+    _require_compatible_practice_session(active_session, metadata.problem_id, language)
     current_branch = preflight_git(root, run)
     if current_branch != original_branch:
         raise LeetError("current branch changed while LeetCode metadata was loading")
@@ -1241,17 +1243,18 @@ def start_problem(
     directory: Path | None = None
     selected_language: str | None = None
     if _looks_like_url(value):
-        canonical_url, requested_slug = canonicalize_problem_url(value)
+        canonical_url, _ = canonicalize_problem_url(value)
         selected_language = requested_language or _configured_primary_language(root)
 
-        # ``--no-branch`` deliberately keeps the scaffold on the current
-        # branch, so it cannot use the conventional feature-branch fast path
-        # below.  Its tracked URL metadata gives us an equally exact repeat
-        # guard without requiring a clean tree or another network request.
-        if no_branch:
-            local_problem = _existing_problem_for_url(root, canonical_url, requested_language)
-            if local_problem is not None:
-                selected_language, local_problem_id, directory = local_problem
+        # A repeated URL start can run while the first invocation's scaffold is
+        # still untracked.  Use the exact URL recorded by that scaffold and the
+        # branch derived from its created directory, so a title/URL slug mismatch
+        # cannot defeat the dirty-worktree repeat guard.
+        local_problem = _existing_problem_for_url(root, canonical_url, requested_language)
+        if local_problem is not None:
+            selected_language, local_problem_id, directory = local_problem
+            expected_branch = _branch_name_for_directory(local_problem_id, directory)
+            if no_branch or current_without_preflight == expected_branch:
                 _require_compatible_practice_session(
                     active_session, local_problem_id, selected_language
                 )
@@ -1261,28 +1264,6 @@ def start_problem(
                     directory,
                     current_without_preflight,
                 )
-
-        # A second ``lc start URL`` runs after the first invocation created
-        # untracked solution files.  Recognize that exact branch and scaffold
-        # before the clean-worktree preflight so the command really is safe to
-        # repeat while the user is solving.
-        branch_match = PROBLEM_BRANCH.fullmatch(current_without_preflight)
-        if branch_match is not None:
-            branch_problem_id = _normalized_problem_id(branch_match["problem_id"])
-            expected_branch = suggested_branch(branch_problem_id, requested_slug)
-            if current_without_preflight == expected_branch:
-                existing = _existing_problem_directory(root, branch_problem_id, requested_language)
-                if existing is not None:
-                    selected_language, directory = existing
-                    _require_compatible_practice_session(
-                        active_session, branch_problem_id, selected_language
-                    )
-                    return _lifecycle_result(
-                        selected_language,
-                        branch_problem_id,
-                        directory,
-                        current_without_preflight,
-                    )
 
         original_branch = preflight_git(root, run)
         metadata = fetch(selected_language, canonical_url)
@@ -2035,13 +2016,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         if command == "resume":
             language, problem_id = _parse_resume_arguments(arguments[1:])
-            result = resume_problem(
-                root,
-                problem_id,
-                language,
-                caller_cwd=caller_cwd,
-                active_session=_read_active_practice_session(root),
-            )
+            store = PracticeStore(root)
+            with store.session_transaction():
+                result = resume_problem(
+                    root,
+                    problem_id,
+                    language,
+                    caller_cwd=caller_cwd,
+                    active_session=_read_active_practice_session(root, store=store),
+                )
             _print_lifecycle_result(result, root)
             return 0
         url_invocation = _url_invocation(
@@ -2050,7 +2033,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         if url_invocation is not None:
             language, problem_url = url_invocation
-            result = scaffold_from_url(root, language, problem_url)
+            store = PracticeStore(root)
+            with store.session_transaction():
+                result = scaffold_from_url(
+                    root,
+                    language,
+                    problem_url,
+                    active_session=_read_active_practice_session(root, store=store),
+                )
             _print_scaffold_result(result, root, language)
             return 0
         command = build_command(arguments, root, caller_cwd)

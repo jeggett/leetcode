@@ -146,6 +146,23 @@ def test_changed_gate_uses_full_gate_for_tooling_changes(tmp_path: Path) -> None
     assert commands == [["pnpm", "run", "ready:all"]]
 
 
+def test_changed_gate_uses_full_gate_when_clean_branch_has_no_worktree_diff(
+    tmp_path: Path,
+) -> None:
+    commands: list[list[str]] = []
+
+    def git_run(_command: tuple[str, ...], _cwd: Path) -> CommandResult:
+        return CommandResult(0, "")
+
+    def run(command: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        commands.append(command)
+        return subprocess.CompletedProcess(command, 0)
+
+    run_changed_gate(tmp_path, run=run, git_run=git_run)
+
+    assert commands == [["pnpm", "run", "ready:all"]]
+
+
 def test_problem_gate_rejects_invalid_or_inconsistent_metadata(tmp_path: Path) -> None:
     cases = (
         ('id = ["bad"]\nlanguage = "ts"\nkind = "function"\n', "invalid metadata"),

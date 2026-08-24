@@ -1933,16 +1933,25 @@ def _python_method_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> st
     return " ".join(signature.split())
 
 
-def _python_class_retry_source(source: str, class_node: ast.ClassDef) -> str:
+def _python_class_retry_source(
+    source: str,
+    class_node: ast.ClassDef,
+    *,
+    include_prelude: bool = True,
+) -> str:
     """Render a blank Python class/design retry with its constructor and public methods."""
 
-    rendered = [
-        '"""Blank interview retry artifact; accepted solution body omitted."""',
-        "from __future__ import annotations",
-        "",
-        "",
-        f"class {class_node.name}:",
-    ]
+    rendered = []
+    if include_prelude:
+        rendered.extend(
+            [
+                '"""Blank interview retry artifact; accepted solution body omitted."""',
+                "from __future__ import annotations",
+                "",
+                "",
+            ]
+        )
+    rendered.append(f"class {class_node.name}:")
     methods = [
         node
         for node in class_node.body
@@ -2067,6 +2076,27 @@ def _python_retry_source(problem: Problem) -> str:
             module = ast.parse(source)
         except (OSError, SyntaxError) as error:
             raise PracticeError(f"could not read solution signature: {error}") from error
+    imported_class_names = _python_imported_class_names(problem)
+    imported_classes = (
+        [
+            node
+            for name in imported_class_names
+            for node in module.body
+            if isinstance(node, ast.ClassDef) and node.name == name
+        ]
+        if module is not None
+        else []
+    )
+    if source is not None and imported_classes:
+        return "\n".join(
+            _python_class_retry_source(
+                source,
+                class_node,
+                include_prelude=index == 0,
+            )
+            for index, class_node in enumerate(imported_classes)
+        )
+
     class_node = (
         _python_solution_class(module, problem.metadata.kind, problem)
         if module is not None
@@ -2114,6 +2144,59 @@ def _python_retry_source(problem: Problem) -> str:
     )
 
 
+def _python_local_import_target(base: Path, module_name: str) -> Path | None:
+    """Resolve a Python module name relative to a copied test's original directory."""
+
+    candidate = base.joinpath(*module_name.split("."))
+    for path in (candidate.with_suffix(".py"), candidate / "__init__.py"):
+        if path.is_file():
+            return path.resolve()
+    return None
+
+
+def _validate_python_retry_test_dependencies(
+    problem: Problem,
+    original_test: Path,
+    test_source: str,
+) -> None:
+    """Reject copied tests whose colocated imports would be broken in the attempt directory."""
+
+    try:
+        module = ast.parse(test_source)
+    except SyntaxError as error:
+        raise PracticeError(f"retry cannot parse {original_test}: {error}") from error
+    dependencies: set[Path] = set()
+    for node in ast.walk(module):
+        candidates: list[tuple[Path, str]] = []
+        if isinstance(node, ast.Import):
+            candidates.extend((original_test.parent, alias.name) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = original_test.parent
+            for _ in range(max(node.level - 1, 0)):
+                base = base.parent
+            module_names = (
+                [node.module]
+                if node.module
+                else [alias.name for alias in node.names if alias.name != "*"]
+            )
+            candidates.extend((base, name) for name in module_names)
+        for base, module_name in candidates:
+            target = _python_local_import_target(base, module_name)
+            if target is None or target in {problem.source_path.resolve(), original_test.resolve()}:
+                continue
+            try:
+                target.relative_to(problem.directory.resolve())
+            except ValueError:
+                continue
+            dependencies.add(target)
+    if dependencies:
+        names = ", ".join(str(path.relative_to(problem.directory)) for path in sorted(dependencies))
+        raise PracticeError(
+            f"retry cannot safely copy {original_test.name}: colocated Python import(s) {names} "
+            "would not resolve from the isolated attempt; create the retry manually"
+        )
+
+
 def retry(
     root: Path | str = ".",
     problem_id: str | int = "",
@@ -2150,13 +2233,13 @@ def retry(
             raise PracticeStateError(
                 f"could not read retry test {original_test}: {error}"
             ) from error
-        attempt_test_source = (
-            _rewrite_typescript_retry_test(
+        if problem.language == "ts":
+            attempt_test_source = _rewrite_typescript_retry_test(
                 problem, original_test, attempt_test, original_test_source
             )
-            if problem.language == "ts"
-            else original_test_source
-        )
+        else:
+            _validate_python_retry_test_dependencies(problem, original_test, original_test_source)
+            attempt_test_source = original_test_source
     try:
         attempt_directory.mkdir(parents=True, exist_ok=False)
         attempt_path.write_text(source, encoding="utf-8")
