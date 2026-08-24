@@ -97,6 +97,23 @@ def test_creates_typescript_layout(tmp_path: Path) -> None:
     assert "## Key invariant" in (source.parent / "notes.md").read_text(encoding="utf-8")
 
 
+def test_metadata_preserves_non_bmp_unicode_scalars(tmp_path: Path) -> None:
+    source, _, _ = create_problem(
+        tmp_path,
+        "ts",
+        "1",
+        ["Happy Path 😀"],
+        details=ProblemDetails(topics=("Smile 😀",)),
+    )
+
+    metadata_text = (source.parent / "problem.toml").read_text(encoding="utf-8")
+    metadata = tomllib.loads(metadata_text)
+
+    assert "\\ud83d" not in metadata_text
+    assert metadata["title"] == "Happy Path 😀"
+    assert metadata["topics"] == ["Smile 😀"]
+
+
 def test_scaffolds_study_metadata_examples_and_official_design_starter(tmp_path: Path) -> None:
     source, test, _ = create_problem(
         tmp_path,

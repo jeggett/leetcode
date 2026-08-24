@@ -64,7 +64,7 @@ STATE_DIRECTORY_NAME = ".lc"
 HISTORY_FILE_NAME = "practice-history.jsonl"
 ACTIVE_FILE_NAME = "practice-active.json"
 ATTEMPT_DIRECTORY_NAME = "practice-attempts"
-FINISH_LOCK_FILE_NAME = "practice-finish.lock"
+SESSION_LOCK_FILE_NAME = "practice-session.lock"
 TRACK_FILE_NAME = "interview-core.toml"
 
 LANGUAGE_DIRECTORIES = {"ts": "typescript", "py": "python"}
@@ -911,7 +911,7 @@ class PracticeStore:
         self.history_path = self.state_dir / HISTORY_FILE_NAME
         self.active_path = self.state_dir / ACTIVE_FILE_NAME
         self.attempts_dir = self.state_dir / ATTEMPT_DIRECTORY_NAME
-        self.finish_lock_path = self.state_dir / FINISH_LOCK_FILE_NAME
+        self.session_lock_path = self.state_dir / SESSION_LOCK_FILE_NAME
         self.history_file = self.history_path
         self.active_file = self.active_path
 
@@ -962,14 +962,14 @@ class PracticeStore:
             raise PracticeStateError(f"could not append practice history: {error}") from error
 
     @contextmanager
-    def finish_transaction(self) -> Iterator[None]:
-        """Serialize the read, append, and active-session cleanup performed by ``finish``."""
+    def session_transaction(self) -> Iterator[None]:
+        """Serialize active-session creation, completion, and history updates."""
 
         self._ensure_state_dir()
         try:
-            stream = self.finish_lock_path.open("a+", encoding="utf-8")
+            stream = self.session_lock_path.open("a+", encoding="utf-8")
         except OSError as error:
-            raise PracticeStateError(f"could not open practice finish lock: {error}") from error
+            raise PracticeStateError(f"could not open practice session lock: {error}") from error
         with stream:
             try:
                 fcntl.flock(stream, fcntl.LOCK_EX)
@@ -1197,24 +1197,25 @@ def _new_session(
             track_path=track_path,
         )
     store = PracticeStore(repository_root)
-    if store.read_active() is not None:
-        raise PracticeStateError("a practice session is already active; finish it first")
-    records = _filtered_records(store, canonical_language)
-    latest = _latest_records(records).get((canonical_language, problem.problem_id))
-    selected_mode = mode
-    if selected_mode is None:
-        selected_mode = "review" if latest is not None and latest.due_at <= current else "new"
-    selected_mode = _validate_mode(selected_mode)
-    session = Session(
-        session_id=uuid.uuid4().hex,
-        problem_id=problem.problem_id,
-        language=canonical_language,
-        mode=selected_mode,
-        started_at=current,
-        problem_title=problem.title,
-    )
-    store.write_active(session)
-    return session
+    with store.session_transaction():
+        if store.read_active() is not None:
+            raise PracticeStateError("a practice session is already active; finish it first")
+        records = _filtered_records(store, canonical_language)
+        latest = _latest_records(records).get((canonical_language, problem.problem_id))
+        selected_mode = mode
+        if selected_mode is None:
+            selected_mode = "review" if latest is not None and latest.due_at <= current else "new"
+        selected_mode = _validate_mode(selected_mode)
+        session = Session(
+            session_id=uuid.uuid4().hex,
+            problem_id=problem.problem_id,
+            language=canonical_language,
+            mode=selected_mode,
+            started_at=current,
+            problem_title=problem.title,
+        )
+        store.write_active(session)
+        return session
 
 
 def start(
@@ -1259,7 +1260,7 @@ def finish(
     validated_result = _validate_result(result)
     validated_confidence = _validate_confidence(confidence)
     store = PracticeStore(root)
-    with store.finish_transaction():
+    with store.session_transaction():
         history = store.read_history()
         session = store.read_active()
         if session is None:

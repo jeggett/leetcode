@@ -369,6 +369,24 @@ def test_resume_by_id_switches_existing_branch(tmp_path: Path) -> None:
     assert git.branch == result.branch
 
 
+def test_resume_detects_language_after_switching_to_problem_branch(tmp_path: Path) -> None:
+    git = LifecycleGit(tmp_path)
+    target_branch = "feat/p-0035-search-insert-position"
+    git.branches.add(target_branch)
+
+    def switch_with_python_problem(command: Sequence[str], cwd: Path) -> lc.CommandResult:
+        result = git(command, cwd)
+        if tuple(command) == ("git", "switch", target_branch):
+            make_problem(tmp_path, "py")
+        return result
+
+    result = lc.resume_problem(tmp_path, "35", run=switch_with_python_problem)
+
+    assert result.language == "py"
+    assert result.directory == tmp_path / "src/python/p_0035_search_insert_position"
+    assert git.branch == target_branch
+
+
 def test_start_timer_is_idempotent_for_the_same_problem(tmp_path: Path) -> None:
     directory = make_problem(tmp_path, "ts")
     source = directory / f"{directory.name}.ts"

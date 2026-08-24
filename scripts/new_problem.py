@@ -497,10 +497,12 @@ def render_problem_metadata(
         values.append(("signature", signature))
 
     lines = [
-        f"{key} = {value}" if isinstance(value, int) else f"{key} = {json.dumps(value)}"
+        f"{key} = {value}"
+        if isinstance(value, int)
+        else f"{key} = {json.dumps(value, ensure_ascii=False)}"
         for key, value in values
     ]
-    lines.append(f"topics = {json.dumps(list(details.topics))}")
+    lines.append(f"topics = {json.dumps(list(details.topics), ensure_ascii=False)}")
     return "\n".join(lines) + "\n"
 
 

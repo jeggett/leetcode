@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -206,6 +208,46 @@ def test_finish_with_session_id_is_idempotent_after_success(tmp_path: Path) -> N
 
     assert second == first
     assert PracticeStore(tmp_path).read_history() == [first]
+
+
+def test_start_serializes_active_session_check_and_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    first_read = threading.Event()
+    second_read = threading.Event()
+    release_write = threading.Event()
+    read_lock = threading.Lock()
+    read_count = 0
+    original_read_active = PracticeStore.read_active
+    original_write_active = PracticeStore.write_active
+
+    def track_read(store: PracticeStore):
+        nonlocal read_count
+        with read_lock:
+            read_count += 1
+            (first_read if read_count == 1 else second_read).set()
+        return original_read_active(store)
+
+    def block_first_write(store: PracticeStore, session) -> None:
+        assert release_write.wait(timeout=2)
+        original_write_active(store, session)
+
+    monkeypatch.setattr(PracticeStore, "read_active", track_read)
+    monkeypatch.setattr(PracticeStore, "write_active", block_first_write)
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        first = executor.submit(start, tmp_path, "0001", now=BASE_TIME)
+        assert first_read.wait(timeout=2)
+        second = executor.submit(start, tmp_path, "0001", now=BASE_TIME)
+        assert not second_read.wait(timeout=0.1)
+        release_write.set()
+        session = first.result(timeout=2)
+        with pytest.raises(PracticeStateError, match="already active"):
+            second.result(timeout=2)
+
+    assert second_read.is_set()
+    assert PracticeStore(tmp_path).read_active() == session
 
 
 def test_finish_rejects_invalid_confidence_and_missing_session(tmp_path: Path) -> None:

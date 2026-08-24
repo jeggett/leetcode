@@ -1509,10 +1509,8 @@ def resume_problem(
             target_branch = _branch_for_problem_id(root, normalized_id, run)
             if target_branch is None:
                 raise LcUsageError(f"problem ID {normalized_id} is not available locally")
-            selected_language = language or _configured_primary_language(root)
-            directory = (
-                root / "src" / ("python" if selected_language == "py" else "typescript") / ""
-            )
+            selected_language = language
+            directory = None
         else:
             selected_language, directory = existing
             target_branch = _branch_name_for_directory(normalized_id, directory)
@@ -1521,7 +1519,7 @@ def resume_problem(
     if not _branch_exists(root, target_branch, run):
         raise LeetError(f"branch does not exist: {target_branch}")
     current = _switch_branch(root, current, target_branch, run)
-    if not directory.is_dir():
+    if directory is None or not directory.is_dir():
         existing = _existing_problem_directory(root, normalized_id, selected_language)
         if existing is None:
             raise LeetError(

@@ -104,6 +104,9 @@ def test_changed_paths_select_problems_and_escalate_tooling() -> None:
     _, full = changed_problem_keys(["scripts/lc.py"])
     assert full is True
 
+    _, full = changed_problem_keys(["bin/lc"])
+    assert full is True
+
     for compatibility_file in ("lc.toml", ".node-version", ".python-version"):
         _, full = changed_problem_keys([compatibility_file])
         assert full is True

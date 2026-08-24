@@ -271,7 +271,7 @@ def changed_problem_keys(paths: Sequence[str]) -> tuple[list[tuple[str, str]], b
     """Return changed problem IDs and whether repository tooling also changed."""
     keys: set[tuple[str, str]] = set()
     requires_full = False
-    code_prefixes = ("scripts/", "tests/", ".github/", ".husky/", ".vscode/")
+    code_prefixes = ("bin/", "scripts/", "tests/", ".github/", ".husky/", ".vscode/")
     code_files = {
         "package.json",
         "pnpm-lock.yaml",
