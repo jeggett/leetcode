@@ -205,6 +205,22 @@ def test_problem_gate_accepts_identity_fields_in_supported_metadata_tables(
     validate_problem_metadata(resolve_problem_paths(tmp_path, "ts", "1"))
 
 
+@pytest.mark.parametrize(
+    "invalid_field",
+    ['target_minutes = "35"\n', "topics = [1]\n"],
+)
+def test_problem_metadata_validation_checks_all_supported_fields(
+    tmp_path: Path, invalid_field: str
+) -> None:
+    make_problem(
+        tmp_path,
+        metadata=('id = "0001"\nlanguage = "ts"\nkind = "function"\n' + invalid_field),
+    )
+
+    with pytest.raises(ReadyError, match="target_minutes|tags"):
+        validate_problem_metadata(resolve_problem_paths(tmp_path, "ts", "1"))
+
+
 def test_full_metadata_validation_checks_every_problem(tmp_path: Path) -> None:
     make_problem(
         tmp_path,
@@ -213,6 +229,15 @@ def test_full_metadata_validation_checks_every_problem(tmp_path: Path) -> None:
     )
 
     with pytest.raises(ReadyError, match="does not match problem 0001"):
+        validate_all_problem_metadata(tmp_path)
+
+
+def test_full_metadata_validation_requires_every_problem_test(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts")
+    test_path = tmp_path / "src/typescript/p_0001_two_sum/p_0001_two_sum.test.ts"
+    test_path.unlink()
+
+    with pytest.raises(ReadyError, match="solution test is missing"):
         validate_all_problem_metadata(tmp_path)
 
 

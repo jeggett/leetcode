@@ -382,20 +382,41 @@ class TrackEntry:
 def _track_entries(payload: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:
     entries = payload.get("problems")
     if isinstance(entries, list):
-        return (entry for entry in entries if isinstance(entry, Mapping))
+        for index, entry in enumerate(entries, 1):
+            if not isinstance(entry, Mapping):
+                raise MetadataError(f"track problems entry {index} must be a table")
+        return entries
     if isinstance(entries, Mapping):
         mapped: list[Mapping[str, Any]] = []
         for problem_id, entry in entries.items():
-            if isinstance(entry, Mapping):
-                values = dict(entry)
-                values.setdefault("id", problem_id)
-                mapped.append(values)
+            if not isinstance(entry, Mapping):
+                raise MetadataError(f"track problem {problem_id} must be a table")
+            values = dict(entry)
+            values.setdefault("id", problem_id)
+            mapped.append(values)
         return mapped
+    if entries is not None:
+        raise MetadataError("track problems must be a list or table")
+
+    singular_entries = payload.get("problem")
+    if isinstance(singular_entries, Mapping):
+        mapped = []
+        for problem_id, entry in singular_entries.items():
+            if not isinstance(entry, Mapping):
+                raise MetadataError(f"track problem {problem_id} must be a table")
+            values = dict(entry)
+            values.setdefault("id", problem_id)
+            mapped.append(values)
+        return mapped
+    if singular_entries is not None:
+        raise MetadataError("track problem must be a table")
 
     # Also accept [p_0001] and [problem.0001] style tables for easy hand editing.
     mapped = []
     for key, entry in payload.items():
-        if isinstance(entry, Mapping) and (str(key).isdecimal() or str(key).startswith("p_")):
+        if str(key).isdecimal() or str(key).startswith("p_"):
+            if not isinstance(entry, Mapping):
+                raise MetadataError(f"track problem {key} must be a table")
             values = dict(entry)
             values.setdefault("id", str(key).removeprefix("p_"))
             mapped.append(values)
@@ -2077,15 +2098,20 @@ def _python_retry_source(problem: Problem) -> str:
         except (OSError, SyntaxError) as error:
             raise PracticeError(f"could not read solution signature: {error}") from error
     imported_class_names = _python_imported_class_names(problem)
-    imported_classes = (
-        [
-            node
-            for name in imported_class_names
-            for node in module.body
-            if isinstance(node, ast.ClassDef) and node.name == name
-        ]
+    available_classes = (
+        {node.name: node for node in module.body if isinstance(node, ast.ClassDef)}
         if module is not None
-        else []
+        else {}
+    )
+    unsupported_imports = [name for name in imported_class_names if name not in available_classes]
+    if unsupported_imports:
+        names = ", ".join(unsupported_imports)
+        raise PracticeError(
+            f"retry cannot safely recreate imported Python export(s) {names}; "
+            "only class interfaces are supported, so create the retry manually"
+        )
+    imported_classes = (
+        [available_classes[name] for name in imported_class_names] if available_classes else []
     )
     if source is not None and imported_classes:
         return "\n".join(

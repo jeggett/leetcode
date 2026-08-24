@@ -1275,6 +1275,12 @@ def start_problem(
             raise LeetError("current branch changed while LeetCode metadata was loading")
     else:
         problem_id = _normalized_problem_id(value)
+        if (
+            requested_language is None
+            and active_session is not None
+            and active_session.problem_id == problem_id
+        ):
+            requested_language = active_session.language
         existing = _existing_problem_directory(root, problem_id, requested_language)
         if existing is not None:
             selected_language, directory = existing
@@ -1411,14 +1417,19 @@ def start_problem(
                 f"problem {problem_id} exists on branch {current}; use --from-current to branch "
                 "from here"
             )
+        if selected_language is None:
+            raise LeetError("could not determine the problem language")
+        result = _lifecycle_result(
+            selected_language,
+            problem_id,
+            directory,
+            target_branch,
+            metadata=metadata,
+        )
         switched = run(("git", "switch", "-c", target_branch), root)
         if switched.returncode != 0:
             raise _git_error(f"create and switch to branch {target_branch!r}", switched)
-        if selected_language is None:
-            raise LeetError("could not determine the problem language")
-        return _lifecycle_result(
-            selected_language, problem_id, directory, target_branch, metadata=metadata
-        )
+        return result
 
     if no_branch:
         if metadata is None:

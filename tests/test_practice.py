@@ -114,6 +114,30 @@ def test_metadata_and_track_validation_errors_include_context(tmp_path: Path) ->
         load_track_manifest(track)
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "problems = [1]\n",
+        "[problems]\n0001 = 1\n",
+        "[problem]\n0001 = 1\n",
+        "p_0001 = 1\n",
+    ],
+)
+def test_track_manifest_rejects_non_table_problem_entries(tmp_path: Path, body: str) -> None:
+    track = make_track(tmp_path, body)
+
+    with pytest.raises(MetadataError, match="must be a table|must be a list or table"):
+        load_track_manifest(track)
+
+
+def test_track_manifest_accepts_singular_problem_tables(tmp_path: Path) -> None:
+    track = make_track(tmp_path, '[problem.0001]\npattern = "array"\n')
+
+    manifest = load_track_manifest(track)
+
+    assert manifest["0001"].pattern == "array"
+
+
 def test_schedule_is_deterministic_and_validates_inputs() -> None:
     assert schedule_due_at(BASE_TIME, "solved", 4) == BASE_TIME + timedelta(days=7)
     assert due_date(BASE_TIME, "hinted", 3) == (BASE_TIME + timedelta(days=2)).date()
@@ -496,6 +520,33 @@ def test_retry_recreates_every_python_class_imported_by_the_test(tmp_path: Path)
     assert "class TreeNode:" in source
     assert source.count("from __future__ import annotations") == 1
     assert "return str(root.value)" not in source
+
+
+def test_retry_rejects_unsupported_python_solution_imports_before_writing(
+    tmp_path: Path,
+) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0299",
+        "mixed_exports",
+        source=(
+            "class Solution:\n"
+            "    def solve(self) -> int:\n"
+            "        return 1\n\n\n"
+            "def make_tree():\n"
+            "    return object()\n"
+        ),
+    )
+    (directory / "test_p_0299_mixed_exports.py").write_text(
+        "from p_0299_mixed_exports import Solution, make_tree\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PracticeError, match="imported Python export.*make_tree"):
+        retry(tmp_path, "0299", "py")
+
+    assert not (tmp_path / ".lc/practice-attempts").exists()
 
 
 def test_retry_rejects_colocated_python_test_dependencies_before_writing(

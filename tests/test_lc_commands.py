@@ -291,6 +291,19 @@ def test_start_restores_original_branch_when_existing_target_has_partial_scaffol
     assert ("git", "switch", original_branch) in git.calls
 
 
+def test_start_validates_base_scaffold_before_creating_a_branch(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts")
+    (directory / f"{directory.name}.test.ts").unlink()
+    git = LifecycleGit(tmp_path, branch="main")
+
+    with pytest.raises(lc.LeetError, match="incomplete local problem scaffold"):
+        lc.start_problem(tmp_path, None, "35", run=git)
+
+    assert git.branch == "main"
+    assert "feat/p-0035-search-insert-position" not in git.branches
+    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
+
+
 def test_start_is_repeatable_with_real_untracked_scaffold_files(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     problem = lc.ProblemMetadata(
@@ -839,6 +852,19 @@ def test_typescript_is_the_default_when_a_branch_has_both_languages(tmp_path: Pa
     )
 
     assert context == lc.ProblemContext("ts", "0035", typescript_directory)
+
+
+def test_start_repeat_prefers_active_timer_language_when_unspecified(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts")
+    python_directory = make_problem(tmp_path, "py")
+    target_branch = "feat/p-0035-search-insert-position"
+    git = LifecycleGit(tmp_path, branch=target_branch)
+    active = lc.Session("active", "0035", "py", "new", datetime.now(UTC))
+
+    result = lc.start_problem(tmp_path, None, "35", run=git, active_session=active)
+
+    assert result.language == "py"
+    assert result.directory == python_directory
 
 
 def test_resolves_relative_test_paths_from_the_original_caller_directory(tmp_path: Path) -> None:

@@ -17,7 +17,7 @@ from typing import Iterator
 
 try:
     from scripts.check_incomplete import scaffold_markers
-    from scripts.practice import PracticeError, load_track_manifest
+    from scripts.practice import PracticeError, load_problem_metadata, load_track_manifest
     from scripts.problem_paths import (
         ProblemPathError,
         ProblemPaths,
@@ -28,7 +28,7 @@ try:
     )
 except ModuleNotFoundError:
     from check_incomplete import scaffold_markers
-    from practice import PracticeError, load_track_manifest
+    from practice import PracticeError, load_problem_metadata, load_track_manifest
     from problem_paths import (
         ProblemPathError,
         ProblemPaths,
@@ -108,6 +108,10 @@ def validate_problem_metadata(paths: ProblemPaths) -> None:
     if not metadata_path.is_file():
         return
     try:
+        load_problem_metadata(metadata_path)
+    except PracticeError as error:
+        raise ReadyError(str(error)) from error
+    try:
         document = tomllib.loads(metadata_path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, tomllib.TOMLDecodeError) as error:
         raise ReadyError(f"invalid metadata {metadata_path}: {error}") from error
@@ -168,7 +172,13 @@ def validate_all_problem_metadata(root: Path) -> None:
                 problem_id = normalize_problem_id(match["problem_id"])
             except ProblemPathError as error:
                 raise ReadyError(f"invalid problem directory {directory}: {error}") from error
-            validate_problem_metadata(ProblemPaths(language, problem_id, directory))
+            paths = ProblemPaths(language, problem_id, directory)
+            try:
+                require_source_path(paths)
+                require_test_path(paths)
+            except ProblemPathError as error:
+                raise ReadyError(f"incomplete problem {directory}: {error}") from error
+            validate_problem_metadata(paths)
 
 
 def validate_track_metadata(root: Path) -> None:
