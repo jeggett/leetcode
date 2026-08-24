@@ -1445,18 +1445,24 @@ def start_problem(
     base = current if from_current else _configured_base_branch(root, base_branch)
     if current != base:
         current = _switch_branch(root, current, base, run)
-    _require_new_branch(root, target_branch, run)
-    if metadata is None:
-        raise LeetError("cannot create a local scaffold without URL metadata")
-    if selected_language is None:
-        raise LeetError("could not determine the problem language")
-    _require_new_problem(root, selected_language, metadata)
+    try:
+        _require_new_branch(root, target_branch, run)
+        if metadata is None:
+            raise LeetError("cannot create a local scaffold without URL metadata")
+        if selected_language is None:
+            raise LeetError("could not determine the problem language")
+        _require_new_problem(root, selected_language, metadata)
 
-    switched = run(("git", "switch", "-c", target_branch), root)
-    if switched.returncode != 0:
+        switched = run(("git", "switch", "-c", target_branch), root)
+        if switched.returncode != 0:
+            raise _git_error(f"create and switch to branch {target_branch!r}", switched)
+    except (LeetError, ScaffoldError, OSError) as error:
         if current != original_branch:
-            run(("git", "switch", original_branch), root)
-        raise _git_error(f"create and switch to branch {target_branch!r}", switched)
+            restored = run(("git", "switch", original_branch), root)
+            if restored.returncode != 0:
+                restore_error = _git_error(f"restore branch {original_branch!r}", restored)
+                raise LeetError(f"{error}; {restore_error}") from error
+        raise
     try:
         source_path, test_path, _ = creator(
             root,
@@ -1943,7 +1949,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 mode,
                 start_timer,
             ) = _parse_start_arguments(arguments[1:], root)
-            active_session = _read_active_practice_session(root) if start_timer else None
+            active_session = _read_active_practice_session(root)
             result = start_problem(
                 root,
                 language,

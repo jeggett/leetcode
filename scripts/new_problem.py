@@ -464,9 +464,9 @@ def validate_problem_details(details: ProblemDetails) -> None:
             "use the URL workflow instead of a manual scaffold"
         )
     if not isinstance(details.topics, tuple) or any(
-        not isinstance(topic, str) for topic in details.topics
+        not isinstance(topic, str) or not topic.strip() for topic in details.topics
     ):
-        raise ScaffoldError("problem topics must be strings")
+        raise ScaffoldError("problem topics must be non-empty strings")
     if not isinstance(details.examples, tuple) or any(
         not isinstance(example, str) for example in details.examples
     ):

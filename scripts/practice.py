@@ -87,9 +87,9 @@ SCHEDULE_DAYS: dict[str, tuple[int, int, int, int]] = {
 CLEAN_SOLVE_INTERVALS = (7, 14, 30, 60)
 
 PROBLEM_DIRECTORY_PATTERN = re.compile(r"^p_(?P<number>[0-9]+)_(?P<slug>[a-z0-9][a-z0-9_]*)$")
-TS_FUNCTION_PATTERN = re.compile(
-    r"(?ms)^(?P<prefix>\s*(?:export\s+default\s+|export\s+)?function\s+"
-    r"[A-Za-z_$][A-Za-z0-9_$]*(?:(?!\{).)*?)\s*\{"
+TS_FUNCTION_START_PATTERN = re.compile(
+    r"(?m)^[ \t]*(?P<prefix>(?:export\s+default\s+|export\s+)?(?:async\s+)?"
+    r"function\s+\*?\s*(?P<name>[A-Za-z_$][A-Za-z0-9_$]*))"
 )
 TS_CLASS_PATTERN = re.compile(
     r"(?m)^[ \t]*(?P<header>(?:(?:export|default|abstract|declare)\s+)*class\s+"
@@ -105,6 +105,10 @@ TS_EXPORT_DECLARATION_PATTERN = re.compile(
     r"(?m)^[ \t]*export\s+(?:default\s+)?"
     r"(?P<kind>const|let|var|type|interface|enum|namespace)\s+"
     r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
+)
+TS_TYPE_DECLARATION_START_PATTERN = re.compile(
+    r"(?m)^[ \t]*(?P<header>(?:export\s+)?(?P<kind>type|interface|enum)\s+"
+    r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*))"
 )
 PY_METHOD_PATTERN = re.compile(r"(?m)^(?P<indent>[ \t]+)def\s+(?P<header>[^\n]+):[ \t]*$")
 
@@ -1327,8 +1331,10 @@ def review(
     return start(root, problem_id, language, mode="review", now=now)
 
 
-def _typescript_matching_brace(source: str, opening: int) -> int | None:
-    """Return the closing brace for a TypeScript brace while skipping literals/comments."""
+def _typescript_matching_delimiter(
+    source: str, opening: int, opener: str, closer: str
+) -> int | None:
+    """Return a matching TypeScript delimiter while skipping literals and comments."""
 
     depth = 0
     quote: str | None = None
@@ -1356,14 +1362,205 @@ def _typescript_matching_brace(source: str, opening: int) -> int | None:
             continue
         if character in {"'", '"', "`"}:
             quote = character
-        elif character == "{":
+        elif character == opener:
             depth += 1
-        elif character == "}":
+        elif character == closer:
             depth -= 1
             if depth == 0:
                 return index
         index += 1
     return None
+
+
+def _typescript_matching_brace(source: str, opening: int) -> int | None:
+    """Return the closing brace for a TypeScript brace while skipping literals/comments."""
+
+    return _typescript_matching_delimiter(source, opening, "{", "}")
+
+
+def _typescript_skip_trivia(source: str, index: int) -> int:
+    """Skip TypeScript whitespace and comments from ``index``."""
+
+    while index < len(source):
+        if source[index].isspace():
+            index += 1
+            continue
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
+            continue
+        if source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            index = len(source) if closing == -1 else closing + 2
+            continue
+        break
+    return index
+
+
+def _typescript_quoted_end(source: str, opening: int) -> int:
+    """Return the first index after a quoted TypeScript literal."""
+
+    quote = source[opening]
+    escaped = False
+    index = opening + 1
+    while index < len(source):
+        character = source[index]
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == quote:
+            return index + 1
+        index += 1
+    return len(source)
+
+
+def _typescript_function_body_after_return_type(source: str, index: int) -> int | None:
+    """Locate a function body after a return type, balancing inline type delimiters."""
+
+    stack: list[str] = []
+    expects_operand = True
+    operand_keywords = {"extends", "infer", "keyof", "new", "readonly", "typeof"}
+    while index < len(source):
+        index = _typescript_skip_trivia(source, index)
+        if index >= len(source):
+            return None
+        character = source[index]
+        if character in {"'", '"', "`"}:
+            index = _typescript_quoted_end(source, index)
+            expects_operand = False
+            continue
+        if character == "{" and (expects_operand or stack):
+            closing = _typescript_matching_brace(source, index)
+            if closing is None:
+                return None
+            index = closing + 1
+            expects_operand = False
+            continue
+        if character == "{" and not stack:
+            return index
+        if character in "<([":
+            stack.append({"<": ">", "(": ")", "[": "]"}[character])
+            expects_operand = True
+            index += 1
+            continue
+        if stack and character == stack[-1]:
+            stack.pop()
+            expects_operand = False
+            index += 1
+            continue
+        if source.startswith("=>", index):
+            expects_operand = True
+            index += 2
+            continue
+        if character in "|&?:=,":
+            expects_operand = True
+            index += 1
+            continue
+        identifier = re.match(r"[A-Za-z_$][A-Za-z0-9_$]*", source[index:])
+        if identifier is not None:
+            expects_operand = identifier[0] in operand_keywords
+            index += len(identifier[0])
+            continue
+        if not character.isspace():
+            expects_operand = False
+        index += 1
+    return None
+
+
+def _typescript_function_declarations(source: str) -> list[tuple[str, str]]:
+    """Return exported function names and signatures without their bodies."""
+
+    declarations: list[tuple[str, str]] = []
+    for match in TS_FUNCTION_START_PATTERN.finditer(source):
+        if not re.search(r"\bexport\b", match["prefix"]):
+            continue
+        opening = source.find("(", match.end())
+        if opening == -1:
+            continue
+        closing = _typescript_matching_delimiter(source, opening, "(", ")")
+        if closing is None:
+            continue
+        cursor = _typescript_skip_trivia(source, closing + 1)
+        if cursor < len(source) and source[cursor] == ":":
+            body = _typescript_function_body_after_return_type(source, cursor + 1)
+        else:
+            body = cursor if cursor < len(source) and source[cursor] == "{" else None
+        if body is None:
+            continue
+        signature = " ".join(source[match.start() : body].split())
+        declarations.append((match["name"], signature))
+    return declarations
+
+
+def _typescript_type_alias_end(source: str, index: int) -> int:
+    """Return the end of a type alias while balancing nested type delimiters."""
+
+    stack: list[str] = []
+    while index < len(source):
+        character = source[index]
+        if character in {"'", '"', "`"}:
+            index = _typescript_quoted_end(source, index)
+            continue
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            return len(source) if newline == -1 else newline
+        if source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            index = len(source) if closing == -1 else closing + 2
+            continue
+        if character in "{[(<":
+            stack.append({"{": "}", "[": "]", "(": ")", "<": ">"}[character])
+        elif stack and character == stack[-1]:
+            stack.pop()
+        elif character == ";" and not stack:
+            return index + 1
+        elif character == "\n" and not stack:
+            return index
+        index += 1
+    return len(source)
+
+
+def _typescript_type_declarations(source: str) -> dict[str, str]:
+    """Extract file-local type declarations that retry signatures may reference."""
+
+    declarations: dict[str, str] = {}
+    for match in TS_TYPE_DECLARATION_START_PATTERN.finditer(source):
+        if match["kind"] == "type":
+            equals = source.find("=", match.end())
+            if equals == -1:
+                continue
+            end = _typescript_type_alias_end(source, equals + 1)
+        else:
+            opening = source.find("{", match.end())
+            if opening == -1:
+                continue
+            closing = _typescript_matching_brace(source, opening)
+            if closing is None:
+                continue
+            end = closing + 1
+            if end < len(source) and source[end] == ";":
+                end += 1
+        declarations[match["name"]] = source[match.start() : end].strip()
+    return declarations
+
+
+def _typescript_referenced_type_declarations(source: str, rendered: str) -> list[str]:
+    """Return transitive file-local declarations referenced by a retry interface."""
+
+    declarations = _typescript_type_declarations(source)
+    identifiers = set(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", rendered))
+    selected: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for name, declaration in declarations.items():
+            if name not in identifiers or name in selected:
+                continue
+            selected.add(name)
+            identifiers.update(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", declaration))
+            changed = True
+    return [declaration for name, declaration in declarations.items() if name in selected]
 
 
 def _typescript_class_member_header(header: str) -> str | None:
@@ -1611,25 +1808,13 @@ def _typescript_class_retry_source(
 def _typescript_function_signatures(source: str) -> dict[str, str]:
     """Return exported top-level function signatures keyed by their source names."""
 
-    signatures: dict[str, str] = {}
-    for match in TS_FUNCTION_PATTERN.finditer(source):
-        signature = " ".join(match["prefix"].split())
-        name_match = re.search(r"\bfunction\s+([A-Za-z_$][A-Za-z0-9_$]*)", signature)
-        if name_match is None or not re.search(r"\bexport\b", signature):
-            continue
-        signature = re.sub(r"^export\s+default\s+", "export ", signature)
-        if not signature.startswith("export "):
-            signature = f"export {signature}"
-        signatures[name_match[1]] = signature
-    return signatures
+    return dict(_typescript_function_declarations(source))
 
 
 def _typescript_function_retry_source(signature: str) -> str:
     """Render one blank TypeScript function from a trusted declaration signature."""
 
     signature = signature.strip()
-    if "{" in signature:
-        signature = signature.split("{", 1)[0].rstrip()
     if not re.search(r"\bfunction\b", signature):
         signature = f"export function {signature}"
     if not signature.startswith("export ") and "export default" not in signature:
@@ -1674,9 +1859,9 @@ def _typescript_retry_exports(
                     continue
             default_function = next(
                 (
-                    " ".join(match["prefix"].split())
-                    for match in TS_FUNCTION_PATTERN.finditer(source)
-                    if re.search(r"\bexport\s+default\s+function\b", match["prefix"])
+                    signature
+                    for signature in functions.values()
+                    if re.search(r"\bexport\s+default\s+function\b", signature)
                 ),
                 None,
             )
@@ -1706,7 +1891,9 @@ def _typescript_retry_exports(
             f"retry found no supported TypeScript exports imported by {problem.test_path}; "
             "create the retry scaffold manually"
         )
-    return "\n".join(rendered)
+    rendered_source = "\n".join(rendered)
+    dependencies = _typescript_referenced_type_declarations(source, rendered_source)
+    return "\n\n".join([*dependencies, rendered_source])
 
 
 def _python_method_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
@@ -1820,7 +2007,7 @@ def _typescript_retry_source(problem: Problem) -> str:
     if source is not None and (
         problem.metadata.kind in {"class", "design"}
         or (
-            TS_FUNCTION_PATTERN.search(source) is None
+            not _typescript_function_declarations(source)
             and TS_CLASS_PATTERN.search(source) is not None
         )
     ):
@@ -1832,12 +2019,16 @@ def _typescript_retry_source(problem: Problem) -> str:
 
     signature = problem.metadata.signature
     if signature is None and source is not None:
-        match = TS_FUNCTION_PATTERN.search(source)
-        if match is not None:
-            signature = match["prefix"].strip()
+        declarations = _typescript_function_declarations(source)
+        if declarations:
+            _name, signature = declarations[0]
     if signature is None:
         signature = "export function solve(): unknown"
-    return _typescript_function_retry_source(signature)
+    rendered = _typescript_function_retry_source(signature)
+    if source is None:
+        return rendered
+    dependencies = _typescript_referenced_type_declarations(source, rendered)
+    return "\n\n".join([*dependencies, rendered])
 
 
 def _python_retry_source(problem: Problem) -> str:

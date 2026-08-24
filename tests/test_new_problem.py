@@ -204,6 +204,7 @@ def test_main_rejects_manual_non_function_kind(
         (ProblemDetails(target_minutes=True), "target minutes"),
         (ProblemDetails(starter_code="   "), "starter code"),
         (ProblemDetails(topics=("Stack", 1)), "topics"),
+        (ProblemDetails(topics=("Stack", "   ")), "topics"),
         (ProblemDetails(examples=("push(1)", None)), "examples"),
     ],
 )

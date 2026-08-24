@@ -211,6 +211,37 @@ def test_start_uses_main_and_repeats_idempotently(tmp_path: Path) -> None:
     assert ("git", "switch", "-c", "feat/p-0035-search-insert-position") in git.calls
 
 
+def test_start_restores_original_branch_when_base_validation_fails(tmp_path: Path) -> None:
+    original_branch = "feature/current-work"
+    target_branch = "feat/p-0035-search-insert-position"
+    git = LifecycleGit(tmp_path, branch=original_branch)
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+
+    def remote_collision(command: Sequence[str], cwd: Path) -> lc.CommandResult:
+        if tuple(command) == ("git", "for-each-ref", "--format=%(refname)", "refs/remotes"):
+            return lc.CommandResult(0, f"refs/remotes/origin/{target_branch}\n")
+        return git(command, cwd)
+
+    with pytest.raises(lc.LeetError, match="branch already exists on a remote"):
+        lc.start_problem(
+            tmp_path,
+            "ts",
+            PROBLEM_URL,
+            fetch=lambda _language, _url: problem,
+            run=remote_collision,
+        )
+
+    assert git.branch == original_branch
+    assert ("git", "switch", "main") in git.calls
+    assert ("git", "switch", original_branch) in git.calls
+
+
 def test_start_is_repeatable_with_real_untracked_scaffold_files(tmp_path: Path) -> None:
     initialize_git_repository(tmp_path)
     problem = lc.ProblemMetadata(
@@ -869,6 +900,11 @@ def test_main_preserves_implicit_start_language_and_prechecks_timer(
     assert captured["root"] == root
     assert captured["language"] is None
     assert captured["value"] == "1512"
+    options = captured["options"]
+    assert isinstance(options, dict)
+    assert options["active_session"] == active
+
+    assert lc.main(["start", "1512", "--no-timer"]) == 0
     options = captured["options"]
     assert isinstance(options, dict)
     assert options["active_session"] == active

@@ -560,6 +560,61 @@ def test_retry_preserves_every_imported_typescript_solution_export(tmp_path: Pat
     assert "return 98" not in source
 
 
+def test_retry_preserves_type_declarations_referenced_by_function_signatures(
+    tmp_path: Path,
+) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0005",
+        "pair_sum",
+        source=(
+            "type Coordinate = number;\n"
+            "type Pair = [Coordinate, Coordinate];\n\n"
+            "export function pairSum(pair: Pair): Pair { return [pair[0], pair[1]]; }\n"
+        ),
+    )
+    (directory / "p_0005_pair_sum.test.ts").write_text(
+        'import { pairSum } from "./p_0005_pair_sum.js";\n'
+        'test("pair", () => expect(pairSum([1, 2])).toEqual([1, 2]));\n',
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0005")
+    source = attempt.path.read_text(encoding="utf-8")
+
+    assert "type Coordinate = number;" in source
+    assert "type Pair = [Coordinate, Coordinate];" in source
+    assert "export function pairSum(pair: Pair): Pair" in source
+    assert "return [pair[0], pair[1]]" not in source
+
+
+def test_retry_balances_inline_object_types_before_function_bodies(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0006",
+        "inline_object",
+        source=(
+            "export function summarize(value: { key: string }): { count: number } {\n"
+            "    return { count: value.key.length };\n"
+            "}\n"
+        ),
+    )
+    (directory / "p_0006_inline_object.test.ts").write_text(
+        'import { summarize } from "./p_0006_inline_object.js";\n'
+        'test("summary", () => expect(summarize({ key: "x" })).toEqual({ count: 1 }));\n',
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0006")
+    source = attempt.path.read_text(encoding="utf-8")
+
+    assert "function summarize(value: { key: string }): { count: number }" in source
+    assert 'throw new Error("TODO: implement retry")' in source
+    assert "value.key.length" not in source
+
+
 def test_retry_refuses_unsupported_imported_typescript_shapes_before_writing(
     tmp_path: Path,
 ) -> None:
