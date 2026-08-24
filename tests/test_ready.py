@@ -15,6 +15,7 @@ from scripts.ready import (
     staged_paths,
     validate_all_problem_metadata,
     validate_problem_metadata,
+    validate_track_metadata,
 )
 from scripts.problem_paths import resolve_problem_paths
 
@@ -175,6 +176,18 @@ def test_problem_gate_accepts_consistent_metadata(tmp_path: Path) -> None:
     assert len(calls) == 4
 
 
+@pytest.mark.parametrize("table_name", ["problem", "metadata"])
+def test_problem_gate_accepts_identity_fields_in_supported_metadata_tables(
+    tmp_path: Path, table_name: str
+) -> None:
+    make_problem(
+        tmp_path,
+        metadata=f'[{table_name}]\nid = "0001"\nlanguage = "ts"\nkind = "function"\n',
+    )
+
+    validate_problem_metadata(resolve_problem_paths(tmp_path, "ts", "1"))
+
+
 def test_full_metadata_validation_checks_every_problem(tmp_path: Path) -> None:
     make_problem(
         tmp_path,
@@ -184,6 +197,15 @@ def test_full_metadata_validation_checks_every_problem(tmp_path: Path) -> None:
 
     with pytest.raises(ReadyError, match="does not match problem 0001"):
         validate_all_problem_metadata(tmp_path)
+
+
+def test_track_metadata_validation_rejects_invalid_repository_manifest(tmp_path: Path) -> None:
+    track = tmp_path / "tracks/interview-core.toml"
+    track.parent.mkdir(parents=True)
+    track.write_text('[[problems]]\nid = "not-a-number"\n', encoding="utf-8")
+
+    with pytest.raises(ReadyError, match="invalid track entry"):
+        validate_track_metadata(tmp_path)
 
 
 def test_staged_paths_include_deletions_but_not_unstaged_or_untracked(tmp_path: Path) -> None:

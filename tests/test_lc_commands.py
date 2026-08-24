@@ -15,11 +15,22 @@ PROBLEM_URL = "https://leetcode.com/problems/search-insert-position/"
 
 
 def make_problem(root: Path, language: str, problem_id: str = "0035") -> Path:
-    """Create the minimum conventional directory needed for context detection."""
+    """Create a complete conventional problem directory."""
     slug = "search_insert_position"
     directory = root / "src" / ("python" if language == "py" else "typescript")
     directory /= f"p_{problem_id}_{slug}"
     directory.mkdir(parents=True)
+    extension = "py" if language == "py" else "ts"
+    source = directory / f"{directory.name}.{extension}"
+    test = (
+        directory / f"test_{directory.name}.py"
+        if language == "py"
+        else directory / f"{directory.name}.test.ts"
+    )
+    source.write_text("# solution\n" if language == "py" else "export {};\n", encoding="utf-8")
+    test.write_text(
+        "def test_placeholder(): pass\n" if language == "py" else "export {};\n", encoding="utf-8"
+    )
     return directory
 
 
@@ -251,6 +262,24 @@ def test_start_restores_original_branch_when_existing_target_is_incomplete(
     git.branches.add(target_branch)
 
     with pytest.raises(lc.LeetError, match="has no local problem directory"):
+        lc.start_problem(tmp_path, None, "35", run=git)
+
+    assert git.branch == original_branch
+    assert ("git", "switch", target_branch) in git.calls
+    assert ("git", "switch", original_branch) in git.calls
+
+
+def test_start_restores_original_branch_when_existing_target_has_partial_scaffold(
+    tmp_path: Path,
+) -> None:
+    original_branch = "feature/current-work"
+    target_branch = "feat/p-0035-search-insert-position"
+    directory = make_problem(tmp_path, "ts")
+    (directory / f"{directory.name}.test.ts").unlink()
+    git = LifecycleGit(tmp_path, branch=original_branch)
+    git.branches.add(target_branch)
+
+    with pytest.raises(lc.LeetError, match="incomplete local problem scaffold"):
         lc.start_problem(tmp_path, None, "35", run=git)
 
     assert git.branch == original_branch
@@ -922,7 +951,11 @@ def test_main_preserves_implicit_start_language_and_prechecks_timer(
             "feat/p-1512-number-of-good-pairs",
         )
 
-    monkeypatch.setattr(lc, "_read_active_practice_session", lambda _root: active)
+    monkeypatch.setattr(
+        lc,
+        "_read_active_practice_session",
+        lambda _root, **_kwargs: active,
+    )
     monkeypatch.setattr(lc, "start_problem", start)
 
     assert lc.main(["start", "1512"]) == 0
@@ -937,6 +970,61 @@ def test_main_preserves_implicit_start_language_and_prechecks_timer(
     options = captured["options"]
     assert isinstance(options, dict)
     assert options["active_session"] == active
+
+
+def test_main_holds_session_transaction_across_lifecycle_and_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repository"
+    scripts = root / "scripts"
+    directory = root / "src/typescript/p_0035_search_insert_position"
+    scripts.mkdir(parents=True)
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(lc, "__file__", str(scripts / "lc.py"))
+    locked = False
+
+    class Transaction:
+        def __enter__(self) -> None:
+            nonlocal locked
+            locked = True
+
+        def __exit__(self, *_args: object) -> None:
+            nonlocal locked
+            locked = False
+
+    class Store:
+        def session_transaction(self) -> Transaction:
+            return Transaction()
+
+        def read_active(self) -> None:
+            assert locked
+            return None
+
+    store = Store()
+    result = lc.LifecycleResult(
+        "ts",
+        "0035",
+        directory,
+        directory / f"{directory.name}.ts",
+        directory / f"{directory.name}.test.ts",
+        "feat/p-0035-search-insert-position",
+    )
+
+    def start(*_args: object, **_kwargs: object) -> lc.LifecycleResult:
+        assert locked
+        return result
+
+    def ensure(*_args: object, **options: object) -> tuple[lc.Session, bool]:
+        assert locked
+        assert options["store"] is store
+        return lc.Session("session", "0035", "ts", "new", datetime.now(UTC)), True
+
+    monkeypatch.setattr(lc, "PracticeStore", lambda _root: store)
+    monkeypatch.setattr(lc, "start_problem", start)
+    monkeypatch.setattr(lc, "_ensure_practice_session", ensure)
+
+    assert lc.main(["start", "35"]) == 0
+    assert locked is False
 
 
 def test_main_propagates_child_status_and_help_never_runs_a_child(

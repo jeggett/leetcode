@@ -17,6 +17,7 @@ from typing import Iterator
 
 try:
     from scripts.check_incomplete import scaffold_markers
+    from scripts.practice import PracticeError, load_track_manifest
     from scripts.problem_paths import (
         ProblemPathError,
         ProblemPaths,
@@ -27,6 +28,7 @@ try:
     )
 except ModuleNotFoundError:
     from check_incomplete import scaffold_markers
+    from practice import PracticeError, load_track_manifest
     from problem_paths import (
         ProblemPathError,
         ProblemPaths,
@@ -113,7 +115,14 @@ def validate_problem_metadata(paths: ProblemPaths) -> None:
         raise ReadyError(f"invalid metadata {metadata_path}: top-level TOML value must be a table")
 
     problems: list[str] = []
-    raw_id = document.get("id")
+    values = document
+    for table_name in ("problem", "metadata"):
+        table = document.get(table_name)
+        if isinstance(table, dict):
+            values = {**document, **table}
+            break
+
+    raw_id = values.get("id")
     try:
         metadata_id = normalize_problem_id(str(raw_id))
     except ProblemPathError as error:
@@ -122,7 +131,7 @@ def validate_problem_metadata(paths: ProblemPaths) -> None:
         if metadata_id != paths.problem_id:
             problems.append(f"id {metadata_id} does not match problem {paths.problem_id}")
 
-    raw_language = document.get("language")
+    raw_language = values.get("language")
     if not isinstance(raw_language, str):
         problems.append(f"language must be 'py' or 'ts' matching {paths.language}")
     else:
@@ -134,7 +143,7 @@ def validate_problem_metadata(paths: ProblemPaths) -> None:
                 f"language {metadata_language} does not match problem language {paths.language}"
             )
 
-    raw_kind = document.get("kind")
+    raw_kind = values.get("kind")
     if not isinstance(raw_kind, str) or raw_kind not in VALID_METADATA_KINDS:
         allowed = ", ".join(sorted(VALID_METADATA_KINDS))
         problems.append(f"kind must be one of {allowed}")
@@ -160,6 +169,16 @@ def validate_all_problem_metadata(root: Path) -> None:
             except ProblemPathError as error:
                 raise ReadyError(f"invalid problem directory {directory}: {error}") from error
             validate_problem_metadata(ProblemPaths(language, problem_id, directory))
+
+
+def validate_track_metadata(root: Path) -> None:
+    """Validate the repository's configured practice-track manifest."""
+
+    track_path = root / "tracks" / "interview-core.toml"
+    try:
+        load_track_manifest(track_path)
+    except PracticeError as error:
+        raise ReadyError(str(error)) from error
 
 
 def _git_error(result: CommandResult, fallback: str) -> ReadyError:
@@ -441,6 +460,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             run_full_gate(root)
         elif arguments == ["metadata"]:
             validate_all_problem_metadata(root)
+            validate_track_metadata(root)
         elif len(arguments) == 3 and arguments[0] == "current":
             run_problem_gate(root, resolve_problem_paths(root, arguments[1], arguments[2]))
         else:

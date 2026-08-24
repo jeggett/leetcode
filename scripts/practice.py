@@ -1177,8 +1177,8 @@ def review_queue(
     return problems if limit is None else problems[:limit]
 
 
-def _new_session(
-    root: Path | str,
+def start_in_transaction(
+    store: PracticeStore,
     problem_id: str | int | None,
     language: str | None,
     mode: str | None,
@@ -1186,7 +1186,9 @@ def _new_session(
     *,
     track_path: Path | str | None = None,
 ) -> Session:
-    repository_root = Path(root)
+    """Create a session while the caller holds ``store.session_transaction()``."""
+
+    repository_root = store.root
     canonical_language = normalize_language(language)
     current = _utc(now)
     if problem_id is None:
@@ -1201,26 +1203,45 @@ def _new_session(
             canonical_language,
             track_path=track_path,
         )
-    store = PracticeStore(repository_root)
+    if store.read_active() is not None:
+        raise PracticeStateError("a practice session is already active; finish it first")
+    records = _filtered_records(store, canonical_language)
+    latest = _latest_records(records).get((canonical_language, problem.problem_id))
+    selected_mode = mode
+    if selected_mode is None:
+        selected_mode = "review" if latest is not None and latest.due_at <= current else "new"
+    selected_mode = _validate_mode(selected_mode)
+    session = Session(
+        session_id=uuid.uuid4().hex,
+        problem_id=problem.problem_id,
+        language=canonical_language,
+        mode=selected_mode,
+        started_at=current,
+        problem_title=problem.title,
+    )
+    store.write_active(session)
+    return session
+
+
+def _new_session(
+    root: Path | str,
+    problem_id: str | int | None,
+    language: str | None,
+    mode: str | None,
+    now: datetime | date | None,
+    *,
+    track_path: Path | str | None = None,
+) -> Session:
+    store = PracticeStore(root)
     with store.session_transaction():
-        if store.read_active() is not None:
-            raise PracticeStateError("a practice session is already active; finish it first")
-        records = _filtered_records(store, canonical_language)
-        latest = _latest_records(records).get((canonical_language, problem.problem_id))
-        selected_mode = mode
-        if selected_mode is None:
-            selected_mode = "review" if latest is not None and latest.due_at <= current else "new"
-        selected_mode = _validate_mode(selected_mode)
-        session = Session(
-            session_id=uuid.uuid4().hex,
-            problem_id=problem.problem_id,
-            language=canonical_language,
-            mode=selected_mode,
-            started_at=current,
-            problem_title=problem.title,
+        return start_in_transaction(
+            store,
+            problem_id,
+            language,
+            mode,
+            now,
+            track_path=track_path,
         )
-        store.write_active(session)
-        return session
 
 
 def start(
@@ -1723,25 +1744,33 @@ def _typescript_imported_bindings(problem: Problem) -> tuple[tuple[str, str], ..
                 break
         if module_stem != source_stem:
             continue
-        spec = imported["spec"].strip()
-        if spec.startswith("{"):
-            close = spec.rfind("}")
-            if close == -1:
+        pending_specs = [imported["spec"].strip()]
+        while pending_specs:
+            spec = pending_specs.pop(0)
+            if not spec:
                 continue
-            for item in spec[1:close].split(","):
-                name_parts = item.strip().removeprefix("type ").split(" as ", 1)
-                source_name = name_parts[0].strip()
-                local_name = name_parts[-1].strip()
-                if source_name:
-                    bindings.append((source_name, local_name))
-        elif not spec.startswith("*"):
-            default_name = spec.split(",", 1)[0].strip()
+            if spec.startswith("{"):
+                close = spec.rfind("}")
+                if close == -1:
+                    continue
+                for item in spec[1:close].split(","):
+                    name_parts = item.strip().removeprefix("type ").split(" as ", 1)
+                    source_name = name_parts[0].strip()
+                    local_name = name_parts[-1].strip()
+                    if source_name:
+                        bindings.append((source_name, local_name))
+                continue
+            if spec.startswith("*"):
+                namespace_name = spec.removeprefix("* as ").strip()
+                if namespace_name:
+                    bindings.append(("*", namespace_name))
+                continue
+            default_name, separator, tail = spec.partition(",")
+            default_name = default_name.strip()
             if default_name and re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", default_name):
                 bindings.append(("default", default_name))
-        else:
-            namespace_name = spec.removeprefix("* as ").strip()
-            if namespace_name:
-                bindings.append(("*", namespace_name))
+            if separator:
+                pending_specs.append(tail.strip())
     return tuple(dict.fromkeys(bindings))
 
 

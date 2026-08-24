@@ -560,6 +560,34 @@ def test_retry_preserves_every_imported_typescript_solution_export(tmp_path: Pat
     assert "return 98" not in source
 
 
+def test_retry_preserves_combined_default_and_named_typescript_imports(
+    tmp_path: Path,
+) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0269",
+        "combined_imports",
+        source=(
+            "export default function solve(value: number): number { return value + 99; }\n"
+            "export function helper(value: number): number { return value + 98; }\n"
+        ),
+    )
+    (directory / "p_0269_combined_imports.test.ts").write_text(
+        'import solve, { helper } from "./p_0269_combined_imports.js";\n'
+        'test("combined", () => expect(helper(solve(1))).toBe(2));\n',
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0269")
+    source = attempt.path.read_text(encoding="utf-8")
+
+    assert "export default function solve(value: number): number" in source
+    assert "export function helper(value: number): number" in source
+    assert "return value + 99" not in source
+    assert "return value + 98" not in source
+
+
 def test_retry_preserves_type_declarations_referenced_by_function_signatures(
     tmp_path: Path,
 ) -> None:

@@ -55,9 +55,21 @@ except ModuleNotFoundError:
 
 
 try:
-    from scripts.practice import PracticeError, PracticeStore, Session, start_session
+    from scripts.practice import (
+        PracticeError,
+        PracticeStore,
+        Session,
+        start_in_transaction,
+        start_session,
+    )
 except ModuleNotFoundError:
-    from practice import PracticeError, PracticeStore, Session, start_session  # type: ignore[no-redef]
+    from practice import (  # type: ignore[no-redef]
+        PracticeError,
+        PracticeStore,
+        Session,
+        start_in_transaction,
+        start_session,
+    )
 
 
 GRAPHQL_URL = "https://leetcode.com/graphql/"
@@ -1142,6 +1154,9 @@ def _lifecycle_result(
     metadata: ProblemMetadata | None = None,
 ) -> LifecycleResult:
     source_path, test_path = _problem_file_paths(directory, language)
+    missing = [str(path) for path in (source_path, test_path) if not path.is_file()]
+    if missing:
+        raise LeetError("incomplete local problem scaffold; missing: " + ", ".join(missing))
     return LifecycleResult(
         language,
         problem_id,
@@ -1557,6 +1572,7 @@ def resume_problem(
                 )
             selected_language, directory = existing
         _require_compatible_practice_session(active_session, normalized_id, selected_language)
+        return _lifecycle_result(selected_language, normalized_id, directory, current)
     except LeetError as error:
         if current != original_branch:
             restored = run(("git", "switch", original_branch), root)
@@ -1564,7 +1580,6 @@ def resume_problem(
                 restore_error = _git_error(f"restore branch {original_branch!r}", restored)
                 raise LeetError(f"{error}; {restore_error}") from error
         raise
-    return _lifecycle_result(selected_language, normalized_id, directory, current)
 
 
 def _submit_command(
@@ -1827,10 +1842,12 @@ def _print_lifecycle_result(result: LifecycleResult, root: Path) -> None:
     print(f"{action}: {result.directory.relative_to(root)}")
 
 
-def _read_active_practice_session(root: Path) -> Session | None:
+def _read_active_practice_session(
+    root: Path, *, store: PracticeStore | None = None
+) -> Session | None:
     """Read the timer state and translate storage errors for the unified CLI."""
     try:
-        return PracticeStore(root).read_active()
+        return (store or PracticeStore(root)).read_active()
     except PracticeError as error:
         raise LeetError(f"could not read practice timer: {error}") from error
 
@@ -1840,16 +1857,28 @@ def _ensure_practice_session(
     result: LifecycleResult,
     *,
     mode: str | None = None,
+    store: PracticeStore | None = None,
 ) -> tuple[Session, bool]:
     """Start the problem timer, treating a repeated start of the same problem as resume."""
     try:
-        active = _read_active_practice_session(root)
+        active = _read_active_practice_session(root, store=store)
         if active is not None:
             if active.problem_id == result.problem_id and active.language == result.language:
                 return active, False
             raise LeetError(
                 f"practice session {active.problem_id} ({active.language}) is already active; "
                 "run 'lc finish' first"
+            )
+        if store is not None:
+            return (
+                start_in_transaction(
+                    store,
+                    result.problem_id,
+                    result.language,
+                    mode,
+                    None,
+                ),
+                True,
             )
         return start_session(root, result.problem_id, result.language, mode=mode), True
     except PracticeError as error:
@@ -1981,19 +2010,27 @@ def main(argv: Sequence[str] | None = None) -> int:
                 mode,
                 start_timer,
             ) = _parse_start_arguments(arguments[1:], root)
-            active_session = _read_active_practice_session(root)
-            result = start_problem(
-                root,
-                language,
-                value,
-                from_current=from_current,
-                no_branch=no_branch,
-                base_branch=selected_base,
-                active_session=active_session,
-            )
+            store = PracticeStore(root)
+            with store.session_transaction():
+                active_session = _read_active_practice_session(root, store=store)
+                result = start_problem(
+                    root,
+                    language,
+                    value,
+                    from_current=from_current,
+                    no_branch=no_branch,
+                    base_branch=selected_base,
+                    active_session=active_session,
+                )
+                if start_timer:
+                    session, created = _ensure_practice_session(
+                        root,
+                        result,
+                        mode=mode,
+                        store=store,
+                    )
             _print_lifecycle_result(result, root)
             if start_timer:
-                session, created = _ensure_practice_session(root, result, mode=mode)
                 _print_practice_session(session, created)
             return 0
         if command == "resume":
