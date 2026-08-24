@@ -1497,6 +1497,7 @@ def resume_problem(
     *,
     caller_cwd: Path | None = None,
     run: GitRunner = run_command,
+    active_session: Session | None = None,
 ) -> LifecycleResult:
     """Resume an existing problem branch selected by ID or current context."""
     current = preflight_git(root, run)
@@ -1524,14 +1525,33 @@ def resume_problem(
         target_branch = _branch_name_for_directory(normalized_id, directory)
     if not _branch_exists(root, target_branch, run):
         raise LeetError(f"branch does not exist: {target_branch}")
-    current = _switch_branch(root, current, target_branch, run)
-    if directory is None or not directory.is_dir():
-        existing = _existing_problem_directory(root, normalized_id, selected_language)
-        if existing is None:
+    if active_session is not None:
+        if active_session.problem_id != normalized_id:
             raise LeetError(
-                f"branch {target_branch} has no local problem directory for ID {normalized_id}"
+                f"practice session {active_session.problem_id} ({active_session.language}) is "
+                "already active; run 'lc finish' first"
             )
-        selected_language, directory = existing
+        if selected_language is None:
+            selected_language = active_session.language
+        _require_compatible_practice_session(active_session, normalized_id, selected_language)
+    original_branch = current
+    current = _switch_branch(root, current, target_branch, run)
+    try:
+        if directory is None or not directory.is_dir():
+            existing = _existing_problem_directory(root, normalized_id, selected_language)
+            if existing is None:
+                raise LeetError(
+                    f"branch {target_branch} has no local problem directory for ID {normalized_id}"
+                )
+            selected_language, directory = existing
+        _require_compatible_practice_session(active_session, normalized_id, selected_language)
+    except LeetError as error:
+        if current != original_branch:
+            restored = run(("git", "switch", original_branch), root)
+            if restored.returncode != 0:
+                restore_error = _git_error(f"restore branch {original_branch!r}", restored)
+                raise LeetError(f"{error}; {restore_error}") from error
+        raise
     return _lifecycle_result(selected_language, normalized_id, directory, current)
 
 
@@ -1971,6 +1991,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 problem_id,
                 language,
                 caller_cwd=caller_cwd,
+                active_session=_read_active_practice_session(root),
             )
             _print_lifecycle_result(result, root)
             return 0

@@ -418,6 +418,19 @@ def test_resume_detects_language_after_switching_to_problem_branch(tmp_path: Pat
     assert git.branch == target_branch
 
 
+def test_resume_rejects_a_different_active_problem_before_switching(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts")
+    git = LifecycleGit(tmp_path)
+    git.branches.add("feat/p-0035-search-insert-position")
+    active = lc.Session("active", "0099", "ts", "new", datetime.now(UTC))
+
+    with pytest.raises(lc.LeetError, match="0099.*already active"):
+        lc.resume_problem(tmp_path, "35", run=git, active_session=active)
+
+    assert git.branch == "feat/p-0099-existing"
+    assert not any(call[:2] == ("git", "switch") for call in git.calls)
+
+
 def test_start_timer_is_idempotent_for_the_same_problem(tmp_path: Path) -> None:
     directory = make_problem(tmp_path, "ts")
     source = directory / f"{directory.name}.ts"

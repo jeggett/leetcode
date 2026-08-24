@@ -1,3 +1,4 @@
+import re
 import subprocess
 from pathlib import Path
 
@@ -236,6 +237,21 @@ def test_staged_gate_rejects_unstaged_only_dependency_manifest_edits(tmp_path: P
     package.write_text('{"name": "unstaged"}\n', encoding="utf-8")
 
     with pytest.raises(ReadyError, match=r"unsafe: package\.json"):
+        run_staged_gate(tmp_path, run=lambda *_args, **_kwargs: None)
+
+
+@pytest.mark.parametrize("pin_file", ["mise.toml", ".node-version", ".python-version"])
+def test_staged_gate_rejects_unstaged_toolchain_pin_edits(tmp_path: Path, pin_file: str) -> None:
+    make_problem(tmp_path)
+    pin = tmp_path / pin_file
+    pin.write_text("baseline\n", encoding="utf-8")
+    initialize_git(tmp_path)
+    source = tmp_path / "src/typescript/p_0001_two_sum/p_0001_two_sum.ts"
+    source.write_text("export function twoSum(): number[] { return [1]; }\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(tmp_path), "add", str(source)], check=True)
+    pin.write_text("unstaged\n", encoding="utf-8")
+
+    with pytest.raises(ReadyError, match=rf"unsafe: .*{re.escape(pin_file)}"):
         run_staged_gate(tmp_path, run=lambda *_args, **_kwargs: None)
 
 

@@ -98,7 +98,8 @@ TS_CLASS_PATTERN = re.compile(
 TS_CLASS_MEMBER_PATTERN = re.compile(
     r"^(?:(?:(?:public|private|protected|static|readonly|abstract|override|async|get|set)\s+)*"
     r")(?:constructor|[A-Za-z_$][A-Za-z0-9_$]*)"
-    r"(?:\s*<[^{}()]*>)?\s*\([^{}]*\)\s*(?::\s*.+)?$",
+    r"(?:\s*<[^{}()]*>)?\s*"
+    r"\((?:[^(){}]|\{[^{}]*\}|\([^()]*\))*\)\s*(?::\s*.+)?$",
     re.DOTALL,
 )
 TS_EXPORT_DECLARATION_PATTERN = re.compile(
@@ -1584,7 +1585,6 @@ def _typescript_class_methods(source: str, opening: int, closing: int) -> list[s
 
     methods: list[str] = []
     member_start = opening + 1
-    depth = 0
     quote: str | None = None
     escaped = False
     index = opening + 1
@@ -1610,18 +1610,16 @@ def _typescript_class_methods(source: str, opening: int, closing: int) -> list[s
             continue
         if character in {"'", '"', "`"}:
             quote = character
-        elif character == "{" and depth == 0:
+        elif character == "{":
             member = _typescript_class_member_header(source[member_start:index])
+            member_closing = _typescript_matching_brace(source, index)
+            if member_closing is None or member_closing > closing:
+                break
             if member is not None:
                 methods.append(member)
-            depth = 1
-        elif character == "{" and depth > 0:
-            depth += 1
-        elif character == "}" and depth > 0:
-            depth -= 1
-            if depth == 0:
-                member_start = index + 1
-        elif character == ";" and depth == 0:
+                member_start = member_closing + 1
+            index = member_closing
+        elif character == ";":
             member_start = index + 1
         index += 1
     return methods

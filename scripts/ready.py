@@ -66,6 +66,9 @@ GitRunner = Callable[[Sequence[str], Path], CommandResult]
 # source tree and the live dependency directories describe different projects.
 DEPENDENCY_MANIFESTS = frozenset(
     {
+        ".node-version",
+        ".python-version",
+        "mise.toml",
         "package.json",
         "pnpm-lock.yaml",
         "pyproject.toml",

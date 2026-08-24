@@ -615,6 +615,34 @@ def test_retry_balances_inline_object_types_before_function_bodies(tmp_path: Pat
     assert "value.key.length" not in source
 
 
+def test_retry_balances_inline_object_types_in_class_methods(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0007",
+        "inline_method",
+        source=(
+            "export class Runner {\n"
+            "    run(value: { key: string }): { count: number } {\n"
+            "        return { count: value.key.length };\n"
+            "    }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0007_inline_method.test.ts").write_text(
+        'import { Runner } from "./p_0007_inline_method.js";\n'
+        'test("run", () => expect(new Runner().run({ key: "x" })).toEqual({ count: 1 }));\n',
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0007")
+    source = attempt.path.read_text(encoding="utf-8")
+
+    assert "run(value: { key: string }): { count: number }" in source
+    assert "value.key.length" not in source
+
+
 def test_retry_refuses_unsupported_imported_typescript_shapes_before_writing(
     tmp_path: Path,
 ) -> None:
