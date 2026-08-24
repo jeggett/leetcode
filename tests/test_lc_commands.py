@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import subprocess
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -20,6 +23,29 @@ def make_problem(root: Path, language: str, problem_id: str = "0035") -> Path:
     return directory
 
 
+def initialize_git_repository(root: Path) -> None:
+    """Create the clean main-branch baseline needed by real lifecycle tests."""
+    subprocess.run(("git", "init", "-b", "main"), cwd=root, check=True, capture_output=True)
+    marker = root / ".gitignore"
+    marker.write_text(".lc/\n", encoding="utf-8")
+    subprocess.run(("git", "add", "."), cwd=root, check=True)
+    subprocess.run(
+        (
+            "git",
+            "-c",
+            "user.name=Leet Test",
+            "-c",
+            "user.email=lc@example.invalid",
+            "commit",
+            "-m",
+            "initialize",
+        ),
+        cwd=root,
+        check=True,
+        capture_output=True,
+    )
+
+
 def branch_runner(branch: str) -> lc.CommandResult:
     """Return a Git runner that only permits the branch lookup used for context."""
 
@@ -28,6 +54,53 @@ def branch_runner(branch: str) -> lc.CommandResult:
         return lc.CommandResult(0, f"{branch}\n")
 
     return run
+
+
+class LifecycleGit:
+    """Small stateful Git double for start/resume branch assertions."""
+
+    def __init__(
+        self,
+        root: Path,
+        branch: str = "feat/p-0099-existing",
+        *,
+        dirty: bool = False,
+    ) -> None:
+        self.root = root
+        self.branch = branch
+        self.dirty = dirty
+        self.branches = {"main", branch}
+        self.calls: list[tuple[str, ...]] = []
+
+    def __call__(self, command: Sequence[str], cwd: Path) -> lc.CommandResult:
+        assert cwd == self.root
+        call = tuple(command)
+        self.calls.append(call)
+        if call == ("git", "rev-parse", "--show-toplevel"):
+            return lc.CommandResult(0, f"{self.root}\n")
+        if call == ("git", "status", "--porcelain"):
+            return lc.CommandResult(0, "?? src/new-solution.ts\n" if self.dirty else "")
+        if call == ("git", "branch", "--show-current"):
+            return lc.CommandResult(0, f"{self.branch}\n")
+        if call[:4] == ("git", "show-ref", "--verify", "--quiet"):
+            return lc.CommandResult(
+                0 if call[-1].removeprefix("refs/heads/") in self.branches else 1
+            )
+        if call == ("git", "for-each-ref", "--format=%(refname)", "refs/remotes"):
+            return lc.CommandResult(0)
+        if call == ("git", "for-each-ref", "--format=%(refname:short)", "refs/heads"):
+            return lc.CommandResult(0, "\n".join(sorted(self.branches)))
+        if call[:3] == ("git", "switch", "-c"):
+            self.branch = call[3]
+            self.branches.add(self.branch)
+            return lc.CommandResult(0)
+        if call[:2] == ("git", "switch"):
+            self.branch = call[2]
+            return lc.CommandResult(0)
+        if call[:3] == ("git", "branch", "-D"):
+            self.branches.discard(call[3])
+            return lc.CommandResult(0)
+        raise AssertionError(f"unexpected Git command: {call}")
 
 
 def test_detects_a_problem_from_caller_directory_before_git(tmp_path: Path) -> None:
@@ -78,6 +151,248 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
     )
 
 
+def test_start_uses_main_and_repeats_idempotently(tmp_path: Path) -> None:
+    git = LifecycleGit(tmp_path)
+    metadata = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+
+    def creator(
+        root: Path,
+        language: str,
+        problem_id: str,
+        title: Sequence[str],
+        url: str,
+        signature: str | None,
+        *,
+        details: object,
+    ) -> tuple[Path, Path, str]:
+        assert (language, problem_id, url, signature) == (
+            "ts",
+            "0035",
+            PROBLEM_URL,
+            metadata.signature,
+        )
+        assert details == lc.ProblemDetails()
+        directory = root / "src/typescript/p_0035_search_insert_position"
+        directory.mkdir(parents=True)
+        source = directory / "p_0035_search_insert_position.ts"
+        test = directory / "p_0035_search_insert_position.test.ts"
+        source.write_text("", encoding="utf-8")
+        test.write_text("", encoding="utf-8")
+        return source, test, "feat/p-0035-search-insert-position"
+
+    result = lc.start_problem(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda _language, _url: metadata,
+        run=git,
+        creator=creator,
+    )
+    git.dirty = True
+    repeated = lc.start_problem(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda _language, _url: metadata,
+        run=git,
+        creator=creator,
+    )
+
+    assert result.created
+    assert not repeated.created
+    assert result.branch == repeated.branch == "feat/p-0035-search-insert-position"
+    assert ("git", "switch", "main") in git.calls
+    assert ("git", "switch", "-c", "feat/p-0035-search-insert-position") in git.calls
+
+
+def test_start_is_repeatable_with_real_untracked_scaffold_files(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+
+    created = lc.start_problem(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda _language, _url: problem,
+    )
+    status = subprocess.run(
+        ("git", "status", "--porcelain"),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert status.stdout.strip()
+
+    def unexpected_fetch(_language: str, _url: str) -> lc.ProblemMetadata:
+        raise AssertionError("an idempotent start must not refetch metadata")
+
+    repeated = lc.start_problem(tmp_path, None, PROBLEM_URL, fetch=unexpected_fetch)
+
+    assert created.created is True
+    assert repeated.created is False
+    assert repeated.language == "ts"
+    assert repeated.directory == created.directory
+
+
+def test_no_branch_start_is_repeatable_with_dirty_scaffold_files(tmp_path: Path) -> None:
+    initialize_git_repository(tmp_path)
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+
+    created = lc.start_problem(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda _language, _url: problem,
+        no_branch=True,
+    )
+
+    def unexpected_fetch(_language: str, _url: str) -> lc.ProblemMetadata:
+        raise AssertionError("an idempotent --no-branch start must not refetch metadata")
+
+    repeated = lc.start_problem(
+        tmp_path,
+        None,
+        PROBLEM_URL,
+        fetch=unexpected_fetch,
+        no_branch=True,
+    )
+    branch = subprocess.run(
+        ("git", "branch", "--show-current"),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert created.created is True
+    assert repeated.created is False
+    assert repeated.directory == created.directory
+    assert branch.stdout.strip() == "main"
+
+
+def test_no_branch_id_start_is_repeatable_with_dirty_solution(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts")
+    source = directory / f"{directory.name}.ts"
+    test = directory / f"{directory.name}.test.ts"
+    source.write_text("export function solve(): number { return 1; }\n", encoding="utf-8")
+    test.write_text('test("example", () => expect(true).toBe(true));\n', encoding="utf-8")
+    initialize_git_repository(tmp_path)
+    source.write_text("export function solve(): number { return 2; }\n", encoding="utf-8")
+
+    repeated = lc.start_problem(tmp_path, None, "35", no_branch=True)
+    branch = subprocess.run(
+        ("git", "branch", "--show-current"),
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert repeated.created is False
+    assert repeated.language == "ts"
+    assert repeated.directory == directory
+    assert branch.stdout.strip() == "main"
+
+
+def test_start_without_language_detects_a_python_only_problem(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "py", "1512")
+    git = LifecycleGit(tmp_path, branch="main")
+
+    result = lc.start_problem(tmp_path, None, "1512", run=git)
+
+    assert result.language == "py"
+    assert result.directory == directory
+    assert result.branch == "feat/p-1512-search-insert-position"
+
+
+def test_active_timer_conflict_stops_before_branch_or_file_mutation(tmp_path: Path) -> None:
+    git = LifecycleGit(tmp_path, branch="main")
+    active = lc.Session("session-99", "0099", "ts", "new", datetime.now(UTC))
+    problem = lc.ProblemMetadata(
+        "0035",
+        "Search Insert Position",
+        "search-insert-position",
+        PROBLEM_URL,
+        "searchInsert(nums: number[], target: number): number",
+    )
+    created = False
+
+    def creator(*_arguments: object, **_keywords: object) -> tuple[Path, Path, str]:
+        nonlocal created
+        created = True
+        raise AssertionError("creator must not run while another timer is active")
+
+    with pytest.raises(lc.LeetError, match="0099.*already active"):
+        lc.start_problem(
+            tmp_path,
+            "ts",
+            PROBLEM_URL,
+            fetch=lambda _language, _url: problem,
+            run=git,
+            creator=creator,
+            active_session=active,
+        )
+
+    assert created is False
+    assert git.branch == "main"
+    assert not any(call[:2] == ("git", "switch") for call in git.calls)
+
+
+def test_resume_by_id_switches_existing_branch(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts")
+    git = LifecycleGit(tmp_path)
+    git.branches.add("feat/p-0035-search-insert-position")
+
+    result = lc.resume_problem(tmp_path, "35", run=git)
+
+    assert result.problem_id == "0035"
+    assert result.branch == "feat/p-0035-search-insert-position"
+    assert git.branch == result.branch
+
+
+def test_start_timer_is_idempotent_for_the_same_problem(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts")
+    source = directory / f"{directory.name}.ts"
+    test = directory / f"{directory.name}.test.ts"
+    source.write_text("export function solve(): void {}\n", encoding="utf-8")
+    test.write_text('test("example", () => expect(true).toBe(true));\n', encoding="utf-8")
+    result = lc.LifecycleResult(
+        language="ts",
+        problem_id="0035",
+        directory=directory,
+        source_path=source,
+        test_path=test,
+        branch="feat/p-0035-search-insert-position",
+    )
+
+    first, first_created = lc._ensure_practice_session(tmp_path, result)
+    repeated, repeated_created = lc._ensure_practice_session(tmp_path, result)
+
+    assert first_created is True
+    assert repeated_created is False
+    assert repeated == first
+    assert (tmp_path / ".lc" / "practice-active.json").is_file()
+
+
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
@@ -96,6 +411,18 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
                 "src/python/p_0035_search_insert_position/test_p_0035_search_insert_position.py",
             ),
         ),
+        (
+            (
+                "test",
+                "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.ts",
+            ),
+            (
+                "pnpm",
+                "run",
+                "test:ts",
+                "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
+            ),
+        ),
         (("test", "ts", "35", "--watch"), ("pnpm", "run", "test:one", "ts", "35", "--watch")),
         (
             ("submit", "35"),
@@ -105,11 +432,12 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
             ("submit", "py", "35", "--copy"),
             ("uv", "run", "python", "scripts/submission.py", "py", "35", "--copy"),
         ),
-        (("ready",), ("pnpm", "run", "ready")),
+        (("ready",), ("python", "scripts/ready.py", "changed")),
         (("check",), ("pnpm", "run", "check")),
         (("test-all",), ("pnpm", "run", "test")),
         (("incomplete",), ("pnpm", "run", "incomplete")),
-        (("doctor",), ("pnpm", "run", "doctor")),
+        (("doctor",), ("python", "scripts/doctor.py")),
+        (("compat",), ("pnpm", "run", "compat")),
         (("typecheck",), ("pnpm", "run", "typecheck")),
         (("format",), ("pnpm", "run", "format")),
         (("format", "check"), ("pnpm", "run", "format:check")),
@@ -136,9 +464,9 @@ def test_builds_the_documented_dispatcher_commands(
         ),
         (
             ("copy", "35"),
-            ("uv", "run", "python", "scripts/submission.py", "ts", "35", "--copy"),
+            ("uv", "run", "python", "scripts/submission.py", "ts", "35", "--copy-only"),
         ),
-        (("r",), ("pnpm", "run", "ready")),
+        (("r",), ("python", "scripts/ready.py", "changed")),
         (("c",), ("pnpm", "run", "check")),
         (("fmt", "ts"), ("pnpm", "run", "format:ts")),
     ],
@@ -178,22 +506,153 @@ def test_uses_detected_context_for_test_submit_and_watch(tmp_path: Path) -> None
     )
 
 
-def test_rejects_python_watch_without_running_a_child(tmp_path: Path) -> None:
+def test_allows_runner_passthrough_for_focused_id_and_current_tests(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts")
+
+    assert lc.build_command(("test", "35", "--", "--run", "search"), tmp_path, tmp_path) == (
+        "pnpm",
+        "run",
+        "test:one",
+        "ts",
+        "35",
+        "--run",
+        "search",
+    )
+    assert lc.build_command(("test", "--", "--reporter", "verbose"), tmp_path, directory) == (
+        "pnpm",
+        "run",
+        "test:one",
+        "ts",
+        "0035",
+        "--reporter",
+        "verbose",
+    )
+
+
+def test_supports_python_watch_for_the_current_problem(tmp_path: Path) -> None:
     directory = make_problem(tmp_path, "py")
 
-    with pytest.raises(lc.LcUsageError, match="only supported for TypeScript"):
-        lc.build_command(("test", "--watch"), tmp_path, directory)
+    assert lc.build_command(("test", "--watch"), tmp_path, directory) == (
+        "pnpm",
+        "run",
+        "test:one",
+        "py",
+        "0035",
+        "--watch",
+    )
 
 
-def test_falls_back_to_all_tests_and_all_typescript_watch(tmp_path: Path) -> None:
+def test_builds_scoped_ready_commands(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "py")
+    git_run = branch_runner("feat/p-0035-search-insert-position")
+
+    assert lc.build_command(("ready", "--current"), tmp_path, directory, git_run=git_run) == (
+        "python",
+        "scripts/ready.py",
+        "current",
+        "py",
+        "0035",
+    )
+    assert lc.build_command(("ready", "--changed"), tmp_path, tmp_path) == (
+        "python",
+        "scripts/ready.py",
+        "changed",
+    )
+    assert lc.build_command(("ready", "all"), tmp_path, tmp_path) == (
+        "python",
+        "scripts/ready.py",
+        "all",
+    )
+    assert lc.build_command(("ready",), tmp_path, directory, git_run=git_run) == (
+        "python",
+        "scripts/ready.py",
+        "current",
+        "py",
+        "0035",
+    )
+
+
+def test_builds_practice_commands_with_language_shorthand(tmp_path: Path) -> None:
+    assert lc.build_command(("today", "py", "--limit", "2"), tmp_path, tmp_path) == (
+        "python",
+        "scripts/practice.py",
+        "today",
+        "--language",
+        "py",
+        "--limit",
+        "2",
+        "--human",
+        "--root",
+        str(tmp_path),
+    )
+    assert lc.build_command(
+        ("practice", "start", "ts", "35", "--mode", "mock"), tmp_path, tmp_path
+    ) == (
+        "python",
+        "scripts/practice.py",
+        "start",
+        "--language",
+        "ts",
+        "35",
+        "--mode",
+        "mock",
+        "--human",
+        "--root",
+        str(tmp_path),
+    )
+    assert lc.build_command(
+        ("finish", "--result", "solved", "--confidence", "4"), tmp_path, tmp_path
+    ) == (
+        "python",
+        "scripts/practice.py",
+        "finish",
+        "--result",
+        "solved",
+        "--confidence",
+        "4",
+        "--human",
+        "--root",
+        str(tmp_path),
+    )
+
+
+def test_submit_exposes_safe_copy_and_preflight_controls(tmp_path: Path) -> None:
+    assert lc.build_command(("copy", "35"), tmp_path, tmp_path) == (
+        "uv",
+        "run",
+        "python",
+        "scripts/submission.py",
+        "ts",
+        "35",
+        "--copy-only",
+    )
+    assert lc.build_command(
+        ("submit", "py", "35", "--copy-only", "--no-check"), tmp_path, tmp_path
+    ) == (
+        "uv",
+        "run",
+        "python",
+        "scripts/submission.py",
+        "py",
+        "35",
+        "--copy-only",
+        "--no-check",
+    )
+
+
+def test_requires_explicit_all_outside_a_problem_context(tmp_path: Path) -> None:
     git_run = branch_runner("main")
 
-    assert lc.build_command(("test",), tmp_path, tmp_path, git_run=git_run) == (
+    with pytest.raises(lc.LcUsageError, match="test all"):
+        lc.build_command(("test",), tmp_path, tmp_path, git_run=git_run)
+    with pytest.raises(lc.LcUsageError, match="watch all"):
+        lc.build_command(("watch",), tmp_path, tmp_path, git_run=git_run)
+    assert lc.build_command(("test", "all"), tmp_path, tmp_path, git_run=git_run) == (
         "pnpm",
         "run",
         "test",
     )
-    assert lc.build_command(("watch",), tmp_path, tmp_path, git_run=git_run) == (
+    assert lc.build_command(("watch", "all"), tmp_path, tmp_path, git_run=git_run) == (
         "pnpm",
         "run",
         "test:ts:watch",
@@ -225,10 +684,28 @@ def test_resolves_relative_test_paths_from_the_original_caller_directory(tmp_pat
     )
 
 
+def test_current_reports_problem_branch_and_colocated_paths(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts")
+    source = directory / f"{directory.name}.ts"
+    test = directory / f"{directory.name}.test.ts"
+    source.write_text("", encoding="utf-8")
+    test.write_text("", encoding="utf-8")
+
+    context, branch, source_path, test_path = lc.current_problem_status(
+        tmp_path,
+        directory,
+        git_run=branch_runner("feat/p-0035-search-insert-position"),
+    )
+
+    assert context == lc.ProblemContext("ts", "0035", directory)
+    assert branch == "feat/p-0035-search-insert-position"
+    assert source_path == source
+    assert test_path == test
+
+
 @pytest.mark.parametrize(
     ("arguments", "message"),
     [
-        (("test", "py", "--watch"), "only supported for TypeScript"),
         (("test", "35", "--watch", "--watch"), "only be provided once"),
         (("submit", "35", "--copy", "--copy"), "only be provided once"),
         (("test", "../outside.py"), "inside this repository"),
@@ -273,6 +750,20 @@ def test_manual_scaffold_preserves_language_and_metadata_arguments(tmp_path: Pat
         "--signature",
         signature,
     )
+
+
+def test_vscode_url_task_uses_the_resumable_start_workflow() -> None:
+    tasks_path = Path(__file__).resolve().parents[1] / ".vscode/tasks.json"
+    document = json.loads(tasks_path.read_text(encoding="utf-8"))
+    task = next(
+        item for item in document["tasks"] if item["label"] == "New LeetCode Problem from URL"
+    )
+
+    assert task["args"][-3:] == [
+        "start",
+        "${input:problemLanguage}",
+        "${input:problemUrl}",
+    ]
 
 
 def test_main_preserves_url_scaffolding_and_delegates_manual_new(
@@ -325,6 +816,46 @@ def test_main_preserves_url_scaffolding_and_delegates_manual_new(
     ]
 
 
+def test_main_preserves_implicit_start_language_and_prechecks_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "repository"
+    scripts = root / "scripts"
+    directory = root / "src/python/p_1512_number_of_good_pairs"
+    scripts.mkdir(parents=True)
+    directory.mkdir(parents=True)
+    monkeypatch.setattr(lc, "__file__", str(scripts / "lc.py"))
+    active = lc.Session("session-1512", "1512", "py", "new", datetime.now(UTC))
+    captured: dict[str, object] = {}
+
+    def start(
+        root_arg: Path,
+        language: str | None,
+        value: str,
+        **options: object,
+    ) -> lc.LifecycleResult:
+        captured.update(root=root_arg, language=language, value=value, options=options)
+        return lc.LifecycleResult(
+            "py",
+            "1512",
+            directory,
+            directory / "p_1512_number_of_good_pairs.py",
+            directory / "test_p_1512_number_of_good_pairs.py",
+            "feat/p-1512-number-of-good-pairs",
+        )
+
+    monkeypatch.setattr(lc, "_read_active_practice_session", lambda _root: active)
+    monkeypatch.setattr(lc, "start_problem", start)
+
+    assert lc.main(["start", "1512"]) == 0
+    assert captured["root"] == root
+    assert captured["language"] is None
+    assert captured["value"] == "1512"
+    options = captured["options"]
+    assert isinstance(options, dict)
+    assert options["active_session"] == active
+
+
 def test_main_propagates_child_status_and_help_never_runs_a_child(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -342,9 +873,17 @@ def test_main_propagates_child_status_and_help_never_runs_a_child(
     monkeypatch.setattr(lc, "run_interactive_command", run)
 
     assert lc.main(["ready"]) == 37
-    assert calls == [(("pnpm", "run", "ready"), root)]
+    assert calls == [(("python", "scripts/ready.py", "changed"), root)]
 
     assert lc.main([]) == 0
     assert lc.main(["help"]) == 0
     assert lc.main(["test", "--help"]) == 0
-    assert calls == [(("pnpm", "run", "ready"), root)]
+    assert calls == [(("python", "scripts/ready.py", "changed"), root)]
+
+
+def test_finish_help_documents_elapsed_seconds(capsys: pytest.CaptureFixture[str]) -> None:
+    assert lc.main(["finish", "--help"]) == 0
+
+    output = capsys.readouterr().out
+    assert "--elapsed SECONDS" in output
+    assert "duration in seconds" in output

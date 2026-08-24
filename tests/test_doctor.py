@@ -11,53 +11,74 @@ from scripts.doctor import CommandResult, collect_checks, format_report, main, p
 
 
 def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None:
-    (root / ".node-version").write_text("26.7.0\n", encoding="utf-8")
+    (root / ".node-version").write_text("22.14.0\n", encoding="utf-8")
     (root / "mise.toml").write_text(
-        '[tools]\npython = "3.14.7"\nuv = "0.12.2"\n',
+        '[tools]\nnode = "22.14.0"\n"npm:pnpm" = "11.20.0"\npython = "3.14.7"\nuv = "0.12.2"\n',
         encoding="utf-8",
     )
     (root / "package.json").write_text(
         json.dumps(
             {
                 "packageManager": package_manager,
-                "engines": {"node": ">=22.13.0"},
-                "devDependencies": {"vitest": "4.1.10"},
+                "engines": {"node": ">=22.13.0", "pnpm": "11.20.0"},
+                "devDependencies": {
+                    "@biomejs/biome": "2.5.7",
+                    "husky": "9.1.7",
+                    "typescript": "5.7.3",
+                    "vitest": "4.1.10",
+                },
             }
         ),
         encoding="utf-8",
     )
     (root / "pyproject.toml").write_text(
-        '[dependency-groups]\ndev = ["pytest==9.1.1"]\n',
+        "[dependency-groups]\n"
+        'dev = ["pytest==9.1.1", "pytest-timeout==2.4.0", '
+        '"pytest-watcher==0.6.3", "ruff==0.16.2"]\n',
         encoding="utf-8",
     )
 
 
 def write_dependencies(
-    root: Path, *, node_version: str = "4.1.10", python_version: str = "9.1.1"
+    root: Path,
+    *,
+    node_version: str = "4.1.10",
+    python_version: str = "9.1.1",
 ) -> None:
-    node_dependency = root / "node_modules" / "vitest"
-    node_dependency.mkdir(parents=True)
-    (node_dependency / "package.json").write_text(
-        json.dumps({"name": "vitest", "version": node_version}),
-        encoding="utf-8",
-    )
+    node_versions = {
+        "@biomejs/biome": "2.5.7",
+        "husky": "9.1.7",
+        "typescript": "5.7.3",
+        "vitest": node_version,
+    }
+    for dependency, version in node_versions.items():
+        node_dependency = root / "node_modules" / dependency
+        node_dependency.mkdir(parents=True)
+        (node_dependency / "package.json").write_text(
+            json.dumps({"name": dependency, "version": version}),
+            encoding="utf-8",
+        )
 
     site_packages = root / ".venv" / "lib" / "python3.14" / "site-packages"
-    pytest_package = site_packages / "pytest"
-    pytest_package.mkdir(parents=True)
-    (pytest_package / "__init__.py").write_text("", encoding="utf-8")
-    metadata_directory = site_packages / f"pytest-{python_version}.dist-info"
-    metadata_directory.mkdir()
-    (metadata_directory / "METADATA").write_text(
-        f"Metadata-Version: 2.4\nName: pytest\nVersion: {python_version}\n",
-        encoding="utf-8",
-    )
+    python_versions = {
+        "pytest": python_version,
+        "pytest-timeout": "2.4.0",
+        "pytest-watcher": "0.6.3",
+        "ruff": "0.16.2",
+    }
+    for dependency, version in python_versions.items():
+        metadata_directory = site_packages / f"{dependency}-{version}.dist-info"
+        metadata_directory.mkdir(parents=True)
+        (metadata_directory / "METADATA").write_text(
+            f"Metadata-Version: 2.4\nName: {dependency}\nVersion: {version}\n",
+            encoding="utf-8",
+        )
 
 
 def write_husky_installation(root: Path) -> None:
     source_hook = root / ".husky" / "pre-commit"
     source_hook.parent.mkdir(parents=True)
-    source_hook.write_text("mise exec -- pnpm ready\n", encoding="utf-8")
+    source_hook.write_text("mise exec -- uv run python scripts/ready.py staged\n", encoding="utf-8")
 
     husky_directory = root / ".husky" / "_"
     husky_directory.mkdir(parents=True)
@@ -81,7 +102,8 @@ def write_husky_installation(root: Path) -> None:
 
 def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResult:
     outputs = {
-        ("node", "--version"): "v26.7.0\n",
+        ("mise", "trust", "--show"): "/tmp/project: trusted\n",
+        ("node", "--version"): "v22.14.0\n",
         ("pnpm", "--version"): "11.20.0\n",
         ("python", "--version"): "Python 3.14.7\n",
         ("uv", "--version"): "uv 0.12.2\n",
@@ -91,7 +113,7 @@ def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResu
 
 
 def test_parse_version_accepts_common_version_command_output() -> None:
-    assert parse_version("v26.7.0\n") == "26.7.0"
+    assert parse_version("v22.14.0\n") == "22.14.0"
     assert parse_version("Python 3.14.7") == "3.14.7"
     assert parse_version("unversioned") is None
 
@@ -122,8 +144,8 @@ def test_collect_checks_reports_setup_failures_with_remedies(tmp_path: Path) -> 
     results = {check.name: check for check in checks}
 
     assert not results["command: uv"].passed
-    assert not results["pnpm version"].passed
-    assert "expected 10.0.0, found 11.20.0" in results["pnpm version"].detail
+    assert not results["packageManager"].passed
+    assert "expected pnpm@11.20.0" in results["packageManager"].detail
     assert "pnpm install --frozen-lockfile" in results["node_modules (vitest)"].detail
     assert "uv sync --frozen" in results[".venv (pytest)"].detail
 
@@ -139,15 +161,13 @@ def test_collect_checks_rejects_non_pnpm_package_manager(tmp_path: Path) -> None
     results = {check.name: check for check in checks}
 
     assert not results["packageManager"].passed
-    assert "expected pnpm@<version>" in results["packageManager"].detail
-    assert not results["pnpm version"].passed
-    assert "not pinned in package.json packageManager" in results["pnpm version"].detail
+    assert "expected pnpm@11.20.0" in results["packageManager"].detail
 
 
-def test_collect_checks_rejects_a_pnpm_pin_in_mise(tmp_path: Path) -> None:
+def test_collect_checks_requires_project_local_tool_pins(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     (tmp_path / "mise.toml").write_text(
-        '[tools]\npnpm = "11.20.0"\npython = "3.14.7"\nuv = "0.12.2"\n',
+        '[tools]\npython = "3.14.7"\nuv = "0.12.2"\n',
         encoding="utf-8",
     )
 
@@ -159,7 +179,7 @@ def test_collect_checks_rejects_a_pnpm_pin_in_mise(tmp_path: Path) -> None:
     metadata = next(check for check in checks if check.name == "metadata")
 
     assert not metadata.passed
-    assert "must not pin pnpm" in metadata.detail
+    assert "must pin project tools: node, pnpm" in metadata.detail
 
 
 def test_collect_checks_requires_the_husky_hook_path(tmp_path: Path) -> None:
@@ -284,7 +304,7 @@ def test_collect_checks_rejects_inert_husky_generated_files(
     "contents",
     [
         "exit 0\n",
-        "exit 0\nmise exec -- pnpm ready\n",
+        "exit 0\nmise exec -- pnpm ready:changed\n",
     ],
 )
 def test_collect_checks_rejects_inert_husky_source_hook(tmp_path: Path, contents: str) -> None:
@@ -301,7 +321,7 @@ def test_collect_checks_rejects_inert_husky_source_hook(tmp_path: Path, contents
     result = next(check for check in checks if check.name == "Husky source pre-commit hook")
 
     assert not result.passed
-    assert "mise exec -- pnpm ready" in result.detail
+    assert "mise exec -- uv run python scripts/ready.py staged" in result.detail
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX executable bits are unavailable")
@@ -309,7 +329,6 @@ def test_collect_checks_rejects_inert_husky_source_hook(tmp_path: Path, contents
     ("path", "check_name"),
     [
         (Path(".husky/_/pre-commit"), "Husky generated pre-commit hook"),
-        (Path(".husky/_/h"), "Husky launcher"),
     ],
 )
 def test_collect_checks_requires_executable_generated_husky_files(

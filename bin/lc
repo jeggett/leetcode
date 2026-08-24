@@ -6,5 +6,38 @@ BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$BIN_DIR/.." && pwd -P)
 CALLER_DIRECTORY=$(pwd -P)
 
+# Help and diagnostics must remain available while mise.toml is untrusted or
+# the pinned tools have not been installed yet. Keep these branches before
+# every mise invocation; all normal project commands still use mise below.
+DIRECT_PYTHON=python
+if ! command -v "$DIRECT_PYTHON" >/dev/null 2>&1; then
+    DIRECT_PYTHON=python3
+fi
+
+for argument in "$@"; do
+    case "$argument" in
+        -h|--help)
+            LC_CALLER_CWD=$CALLER_DIRECTORY exec "$DIRECT_PYTHON" "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+            ;;
+    esac
+done
+
+case "${1-}" in
+    ""|help)
+        LC_CALLER_CWD=$CALLER_DIRECTORY exec "$DIRECT_PYTHON" "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+        ;;
+    doctor|d)
+        # Doctor is the bootstrap path: never let its diagnostics trigger mise's
+        # auto-install behavior. It only inspects the available commands and reports
+        # missing or mismatched project tools for setup to repair explicitly.
+        if command -v mise >/dev/null 2>&1 && \
+            MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- true >/dev/null 2>&1; then
+            exec env MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- \
+                python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+        fi
+        exec "$DIRECT_PYTHON" "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+        ;;
+esac
+
 LC_CALLER_CWD=$CALLER_DIRECTORY exec mise -C "$REPOSITORY_ROOT" exec -- \
     python "$REPOSITORY_ROOT/scripts/lc.py" "$@"

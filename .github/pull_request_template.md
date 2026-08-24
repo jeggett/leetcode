@@ -11,6 +11,15 @@
 - Time:
 - Space:
 
+## Practice reflection
+
+- Mode: new / review / mock
+- Duration:
+- Result: solved / hinted / failed
+- Recognition cue or mistake:
+- Confidence (1–4):
+
 ## Validation
 
-- [ ] `lc ready`
+- [ ] `lc ready --current`
+- [ ] `lc compat` when TypeScript syntax or APIs changed

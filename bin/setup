@@ -1,0 +1,60 @@
+#!/usr/bin/env sh
+
+set -eu
+
+BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+REPOSITORY_ROOT=$(CDPATH= cd -- "$BIN_DIR/.." && pwd -P)
+
+usage() {
+    cat <<'EOF'
+usage: setup [--trust]
+
+Install the pinned mise tools and synchronize project dependencies. The
+repository configuration is trusted only when --trust is supplied explicitly.
+EOF
+}
+
+trust_config=false
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --trust)
+            trust_config=true
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            usage >&2
+            exit 2
+            ;;
+    esac
+    shift
+done
+
+if [ "$trust_config" = true ]; then
+    mise -C "$REPOSITORY_ROOT" trust --yes "$REPOSITORY_ROOT/mise.toml"
+fi
+
+# Install independently and accept an already-correct Python before invoking mise's backend.
+mise -C "$REPOSITORY_ROOT" install node
+mise -C "$REPOSITORY_ROOT" install npm:pnpm
+mise -C "$REPOSITORY_ROOT" install uv
+EXPECTED_PYTHON=$(sed -n '1p' "$REPOSITORY_ROOT/.python-version")
+if ! ACTIVE_PYTHON=$(mise -C "$REPOSITORY_ROOT" exec -- python --version 2>&1); then
+    ACTIVE_PYTHON=""
+fi
+if [ "$ACTIVE_PYTHON" != "Python $EXPECTED_PYTHON" ]; then
+    mise -C "$REPOSITORY_ROOT" install python
+    ACTIVE_PYTHON=$(mise -C "$REPOSITORY_ROOT" exec -- python --version 2>&1)
+    if [ "$ACTIVE_PYTHON" != "Python $EXPECTED_PYTHON" ]; then
+        printf '%s\n' "Python $EXPECTED_PYTHON is required; found ${ACTIVE_PYTHON:-nothing}" >&2
+        exit 1
+    fi
+fi
+
+# Every remaining operation is safe to repeat: frozen dependency syncs and Husky's prepare hook
+# converge on the same project state.
+mise -C "$REPOSITORY_ROOT" exec -- pnpm install --frozen-lockfile
+mise -C "$REPOSITORY_ROOT" exec -- uv sync --frozen
+mise -C "$REPOSITORY_ROOT" exec -- pnpm prepare

@@ -1,0 +1,350 @@
+# A small, pattern-oriented interview track.
+#
+# IDs may describe problems that are not scaffolded yet. The practice subsystem uses these entries
+# as defaults, while a problem-local problem.toml can override any field.
+
+[track]
+name = "interview-core"
+description = "A compact progression through high-frequency interview patterns."
+
+[[problems]]
+id = "0001"
+pattern = "hash-map"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0027"
+pattern = "two-pointers"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0041"
+pattern = "cyclic-placement"
+difficulty = "hard"
+target_minutes = 35
+
+[[problems]]
+id = "0049"
+pattern = "hash-map"
+difficulty = "medium"
+target_minutes = 25
+
+[[problems]]
+id = "0076"
+pattern = "sliding-window"
+difficulty = "hard"
+target_minutes = 35
+
+[[problems]]
+id = "0092"
+pattern = "linked-list"
+difficulty = "medium"
+target_minutes = 30
+
+[[problems]]
+id = "0146"
+pattern = "design"
+difficulty = "medium"
+target_minutes = 35
+
+[[problems]]
+id = "0206"
+pattern = "linked-list"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0217"
+pattern = "hash-set"
+difficulty = "easy"
+target_minutes = 15
+
+[[problems]]
+id = "0238"
+pattern = "prefix-suffix"
+difficulty = "medium"
+target_minutes = 25
+
+[[problems]]
+id = "0268"
+pattern = "bitwise"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0283"
+pattern = "two-pointers"
+difficulty = "easy"
+target_minutes = 15
+
+[[problems]]
+id = "0287"
+pattern = "fast-slow-pointers"
+difficulty = "medium"
+target_minutes = 30
+
+[[problems]]
+id = "0322"
+pattern = "dynamic-programming"
+difficulty = "medium"
+target_minutes = 30
+
+[[problems]]
+id = "0408"
+pattern = "two-pointers"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0448"
+pattern = "cyclic-placement"
+difficulty = "easy"
+target_minutes = 25
+
+[[problems]]
+id = "0457"
+pattern = "fast-slow-pointers"
+difficulty = "medium"
+target_minutes = 35
+
+[[problems]]
+id = "2574"
+pattern = "prefix-suffix"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "2620"
+pattern = "closures"
+difficulty = "easy"
+target_minutes = 20
+kind = "language-drill"
+
+[[problems]]
+id = "2634"
+pattern = "higher-order-functions"
+difficulty = "easy"
+target_minutes = 20
+kind = "language-drill"
+
+[[problems]]
+id = "2635"
+pattern = "higher-order-functions"
+difficulty = "easy"
+target_minutes = 20
+kind = "language-drill"
+
+[[problems]]
+id = "2665"
+pattern = "closures"
+difficulty = "easy"
+target_minutes = 20
+kind = "language-drill"
+
+[[problems]]
+id = "2667"
+pattern = "closures"
+difficulty = "easy"
+target_minutes = 15
+kind = "language-drill"
+
+[[problems]]
+id = "2704"
+pattern = "closures"
+difficulty = "easy"
+target_minutes = 20
+kind = "language-drill"
+
+[[problems]]
+id = "2798"
+pattern = "counting"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "2824"
+pattern = "two-pointers"
+difficulty = "easy"
+target_minutes = 25
+
+[[problems]]
+id = "2942"
+pattern = "strings"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "2974"
+pattern = "sorting"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0981"
+pattern = "design"
+difficulty = "medium"
+target_minutes = 30
+
+[[problems]]
+id = "2000"
+pattern = "strings"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "2064"
+pattern = "binary-search"
+difficulty = "medium"
+target_minutes = 30
+
+[[problems]]
+id = "0088"
+pattern = "two-pointers"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0118"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0136"
+pattern = "bitwise"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0561"
+pattern = "sorting"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0744"
+pattern = "binary-search"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0859"
+pattern = "strings"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "0905"
+pattern = "two-pointers"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1313"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1365"
+pattern = "counting"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1389"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1431"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1470"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1480"
+pattern = "prefix-suffix"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1512"
+pattern = "counting"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1528"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1656"
+pattern = "design"
+difficulty = "easy"
+target_minutes = 25
+
+[[problems]]
+id = "1672"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 15
+
+[[problems]]
+id = "1720"
+pattern = "bitwise"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1773"
+pattern = "counting"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1920"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "1929"
+pattern = "arrays"
+difficulty = "easy"
+target_minutes = 15
+
+[[problems]]
+id = "2011"
+pattern = "simulation"
+difficulty = "easy"
+target_minutes = 15
+
+[[problems]]
+id = "2114"
+pattern = "strings"
+difficulty = "easy"
+target_minutes = 15
+
+[[problems]]
+id = "2535"
+pattern = "math"
+difficulty = "easy"
+target_minutes = 20
+
+[[problems]]
+id = "2652"
+pattern = "math"
+difficulty = "easy"
+target_minutes = 20

@@ -1,1 +1,1 @@
-mise exec -- pnpm ready
+mise exec -- uv run python scripts/ready.py staged

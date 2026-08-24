@@ -1,0 +1,540 @@
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from scripts.practice import (
+    MetadataError,
+    PracticeError,
+    PracticeStateError,
+    PracticeStore,
+    ProblemDiscoveryError,
+    build_parser,
+    due_date,
+    discover_problems,
+    finish,
+    list_problems,
+    load_problem_metadata,
+    load_track_manifest,
+    main,
+    progressive_due_at,
+    retry,
+    review_queue,
+    schedule_due_at,
+    start,
+    stats,
+    today,
+)
+
+
+BASE_TIME = datetime(2026, 1, 2, 9, 0, tzinfo=UTC)
+
+
+def make_problem(
+    root: Path,
+    language: str,
+    problem_id: str,
+    slug: str,
+    *,
+    source: str | None = None,
+    metadata: str | None = None,
+) -> Path:
+    directory = root / "src" / ("typescript" if language == "ts" else "python")
+    directory /= f"p_{problem_id}_{slug}"
+    directory.mkdir(parents=True)
+    stem = directory.name
+    source_path = directory / f"{stem}.{'ts' if language == 'ts' else 'py'}"
+    if source is None:
+        source = (
+            "export function solve(value: number): number { return value; }\n"
+            if language == "ts"
+            else "class Solution:\n    def solve(self, value: int) -> int:\n        return value\n"
+        )
+    source_path.write_text(source, encoding="utf-8")
+    if metadata is not None:
+        (directory / "problem.toml").write_text(metadata, encoding="utf-8")
+    return directory
+
+
+def make_track(root: Path, body: str) -> Path:
+    tracks = root / "tracks"
+    tracks.mkdir()
+    path = tracks / "interview-core.toml"
+    path.write_text(body, encoding="utf-8")
+    return path
+
+
+def test_discover_problems_reads_local_metadata_and_track_defaults(tmp_path: Path) -> None:
+    make_problem(
+        tmp_path,
+        "ts",
+        "0002",
+        "two_sum",
+        metadata='title = "Local Two Sum"\ndifficulty = "easy"\n',
+    )
+    make_track(
+        tmp_path,
+        '[track]\nname = "core"\n\n[[problems]]\nid = "2"\npattern = "hash-map"\ntarget_minutes = 20\n',
+    )
+
+    problems = discover_problems(tmp_path, "typescript")
+
+    assert len(problems) == 1
+    problem = problems[0]
+    assert problem.problem_id == "0002"
+    assert problem.title == "Local Two Sum"
+    assert problem.metadata.pattern == "hash-map"
+    assert problem.metadata.target_minutes == 20
+    assert problem.metadata.difficulty == "easy"
+    assert problem.source_path.is_file()
+
+
+def test_discover_problems_detects_duplicate_normalized_ids(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "1", "one")
+    make_problem(tmp_path, "ts", "0001", "another_one")
+
+    with pytest.raises(ProblemDiscoveryError, match="multiple ts problem directories"):
+        discover_problems(tmp_path, "ts")
+
+
+def test_metadata_and_track_validation_errors_include_context(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts", "1", "one")
+    metadata_path = directory / "problem.toml"
+    metadata_path.write_text("target_minutes = 0\n", encoding="utf-8")
+    with pytest.raises(MetadataError, match="target_minutes"):
+        load_problem_metadata(directory)
+
+    track = make_track(tmp_path, '[[problems]]\nid = "1"\n\n[[problems]]\nid = "0001"\n')
+    with pytest.raises(MetadataError, match="duplicate problem ID 0001"):
+        load_track_manifest(track)
+
+
+def test_schedule_is_deterministic_and_validates_inputs() -> None:
+    assert schedule_due_at(BASE_TIME, "solved", 4) == BASE_TIME + timedelta(days=7)
+    assert due_date(BASE_TIME, "hinted", 3) == (BASE_TIME + timedelta(days=2)).date()
+    with pytest.raises(PracticeError, match="confidence"):
+        schedule_due_at(BASE_TIME, "solved", 5)
+    with pytest.raises(PracticeError, match="result"):
+        schedule_due_at(BASE_TIME, "unknown", 1)
+
+
+def test_repeated_clean_solves_expand_to_longer_review_intervals(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    start(tmp_path, "0001", now=BASE_TIME)
+    first = finish(tmp_path, "solved", 4, now=BASE_TIME)
+    start(tmp_path, "0001", now=BASE_TIME + timedelta(days=7))
+    second = finish(tmp_path, "solved", 4, now=BASE_TIME + timedelta(days=7))
+
+    assert first.due_at == BASE_TIME + timedelta(days=7)
+    assert second.due_at == BASE_TIME + timedelta(days=21)
+    assert progressive_due_at(BASE_TIME, "solved", 4, [first, second]) == BASE_TIME + timedelta(
+        days=30
+    )
+
+
+def test_today_prefers_due_then_unseen_and_start_infers_mode(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "0001", "first", metadata="target_minutes = 40\n")
+    make_problem(tmp_path, "ts", "0002", "second", metadata="target_minutes = 10\n")
+    make_problem(tmp_path, "ts", "0003", "third", metadata="target_minutes = 20\n")
+
+    first = start(tmp_path, now=BASE_TIME)
+    assert first.problem_id == "0002"
+    assert first.mode == "new"
+    finish(tmp_path, "failed", 1, elapsed_seconds=12, now=BASE_TIME + timedelta(minutes=20))
+    due = today(tmp_path, limit=2, now=BASE_TIME + timedelta(minutes=20))
+    assert [problem.problem_id for problem in due] == ["0002", "0003"]
+
+    reviewed = start(tmp_path, "0002", now=BASE_TIME + timedelta(minutes=21))
+    assert reviewed.mode == "review"
+    with pytest.raises(PracticeStateError, match="already active"):
+        start(tmp_path, "0003", now=BASE_TIME + timedelta(minutes=22))
+
+
+def test_finish_persists_history_clears_active_and_computes_elapsed(tmp_path: Path) -> None:
+    session = (
+        start(tmp_path, "0001", now=BASE_TIME)
+        if make_problem(tmp_path, "ts", "0001", "one")
+        else None
+    )
+    assert session is not None
+    record = finish(tmp_path, "solved", 4, now=BASE_TIME + timedelta(seconds=95))
+
+    store = PracticeStore(tmp_path)
+    assert store.read_active() is None
+    assert len(store.read_history()) == 1
+    assert record.elapsed_seconds == 95
+    assert record.due_at == BASE_TIME + timedelta(seconds=95, days=7)
+    line = (tmp_path / ".lc/practice-history.jsonl").read_text(encoding="utf-8").strip()
+    assert json.loads(line)["result"] == "solved"
+
+
+def test_finish_rejects_invalid_confidence_and_missing_session(tmp_path: Path) -> None:
+    with pytest.raises(PracticeStateError, match="no active"):
+        finish(tmp_path, "failed", 1)
+    make_problem(tmp_path, "ts", "0001", "one")
+    start(tmp_path, "0001", now=BASE_TIME)
+    with pytest.raises(PracticeError, match="confidence"):
+        finish(tmp_path, "solved", 0)
+    assert PracticeStore(tmp_path).read_active() is not None
+
+
+def test_review_queue_and_status_filters(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    make_problem(tmp_path, "ts", "0002", "two")
+    start(tmp_path, "0001", now=BASE_TIME)
+    finish(tmp_path, "solved", 4, now=BASE_TIME)
+    assert review_queue(tmp_path, now=BASE_TIME + timedelta(days=6)) == []
+    assert [
+        problem.problem_id for problem in review_queue(tmp_path, now=BASE_TIME + timedelta(days=7))
+    ] == ["0001"]
+    assert [
+        status.problem_id for status in list_problems(tmp_path, filter="unseen", now=BASE_TIME)
+    ] == ["0002"]
+    assert [
+        status.problem_id for status in list_problems(tmp_path, filter="scheduled", now=BASE_TIME)
+    ] == ["0001"]
+
+
+def test_stats_contains_attempt_and_latest_state_aggregates(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    start(tmp_path, "0001", now=BASE_TIME)
+    finish(tmp_path, "hinted", 2, elapsed_seconds=30, now=BASE_TIME)
+    start(tmp_path, "0001", now=BASE_TIME + timedelta(days=1))
+    finish(tmp_path, "solved", 3, elapsed_seconds=60, now=BASE_TIME + timedelta(days=1))
+
+    result = stats(tmp_path, now=BASE_TIME + timedelta(days=2))
+
+    assert result["attempts"] == 2
+    assert result["attempted"] == 1
+    assert result["unseen"] == 0
+    assert result["by_result"] == {"hinted": 1, "solved": 1}
+    assert result["latest_by_result"] == {"solved": 1}
+    assert result["average_elapsed_seconds"] == 45
+    assert result["median_elapsed_seconds"] == 45
+    assert result["by_mode"] == {"new": 1, "review": 1}
+    assert result["hint_free_rate"] == 0.5
+    assert result["independent_resolve_rate_30d"] == 1.0
+    assert "unclassified" in result["pattern_matrix"]
+
+
+def test_human_stats_surfaces_timing_and_weak_patterns(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_problem(
+        tmp_path,
+        "ts",
+        "0001",
+        "one",
+        metadata='pattern = "two-pointers"\n',
+    )
+    start(tmp_path, "0001", now=BASE_TIME)
+    finish(tmp_path, "failed", 1, elapsed_seconds=90, now=BASE_TIME)
+
+    assert main(["stats", "--root", str(tmp_path), "--human"]) == 0
+    output = capsys.readouterr().out
+
+    assert "Timing: average 1.5m, median 1.5m" in output
+    assert "Weak patterns: two-pointers" in output
+
+
+def test_stats_does_not_label_unseen_patterns_as_weaknesses(tmp_path: Path) -> None:
+    make_problem(
+        tmp_path,
+        "ts",
+        "0001",
+        "one",
+        metadata='pattern = "two-pointers"\n',
+    )
+
+    assert stats(tmp_path, now=BASE_TIME)["weak_patterns"] == []
+
+
+def test_finish_help_describes_elapsed_seconds(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["finish", "--help"])
+    output = capsys.readouterr().out
+    assert "--elapsed SECONDS" in output
+    assert "seconds" in output
+
+
+def test_scaffold_topics_are_accepted_as_practice_tags(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0001",
+        "one",
+        metadata='title = "One"\ntopics = ["Array", "Hash Table"]\nkind = "function"\n',
+    )
+
+    metadata = load_problem_metadata(directory)
+
+    assert metadata is not None
+    assert metadata.tags == ("Array", "Hash Table")
+    assert metadata.kind == "function"
+
+
+def test_retry_creates_blank_ts_and_python_artifacts_without_copying_solution(
+    tmp_path: Path,
+) -> None:
+    ts_source = "export function secret(value: number): number { return value + 99; }\n"
+    py_source = "from typing import List\n\nclass Solution:\n    def secret(self, values: List[int]) -> int:\n        return 99\n"
+    ts_dir = make_problem(tmp_path, "ts", "0001", "one", source=ts_source)
+    make_problem(tmp_path, "py", "0002", "two", source=py_source)
+
+    ts_attempt = retry(tmp_path, "0001")
+    py_attempt = retry(tmp_path, "0002", "py")
+
+    assert ts_attempt.path.parent.parent.parent == tmp_path / ".lc"
+    assert ts_attempt.path != ts_dir / ts_dir.name / "ts"
+    assert "value + 99" not in ts_attempt.path.read_text(encoding="utf-8")
+    assert "function secret(value: number): number" in ts_attempt.path.read_text(encoding="utf-8")
+    assert "return 99" not in py_attempt.path.read_text(encoding="utf-8")
+    assert "def secret" in py_attempt.path.read_text(encoding="utf-8")
+
+
+def test_retry_preserves_class_interfaces_without_copying_design_bodies(tmp_path: Path) -> None:
+    ts_source = """class Node {
+    constructor(value: number) {
+        this.value = value;
+    }
+    value: number;
+}
+
+export class LRUCache {
+    private secret = 99;
+
+    constructor(capacity: number) {
+        this.secret = capacity;
+    }
+
+    get(key: number): number {
+        return this.secret + key;
+    }
+
+    put(key: number, value: number): void {
+        this.secret = value + key;
+    }
+
+    private helper(): number {
+        return this.secret;
+    }
+}
+"""
+    py_source = """class Node:
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+
+class MinStack:
+    def __init__(self) -> None:
+        self.values = []
+
+    def push(self, value: int) -> None:
+        self.values.append(value)
+
+    def top(self) -> int:
+        return self.values[-1]
+
+    def _secret(self) -> int:
+        return 99
+"""
+    ts_directory = make_problem(
+        tmp_path,
+        "ts",
+        "0003",
+        "lru_cache",
+        source=ts_source,
+        metadata='kind = "design"\n',
+    )
+    py_directory = make_problem(
+        tmp_path,
+        "py",
+        "0004",
+        "min_stack",
+        source=py_source,
+        metadata='kind = "design"\n',
+    )
+    (ts_directory / "p_0003_lru_cache.test.ts").write_text(
+        'import { LRUCache } from "./p_0003_lru_cache.js";\n', encoding="utf-8"
+    )
+    (py_directory / "test_p_0004_min_stack.py").write_text(
+        "from p_0004_min_stack import MinStack\n", encoding="utf-8"
+    )
+
+    ts_attempt = retry(tmp_path, "0003")
+    py_attempt = retry(tmp_path, "0004", "py")
+    ts_retry = ts_attempt.path.read_text(encoding="utf-8")
+    py_retry = py_attempt.path.read_text(encoding="utf-8")
+
+    assert "class Node" not in ts_retry
+    assert "export class LRUCache" in ts_retry
+    assert "constructor(capacity: number)" in ts_retry
+    assert "get(key: number): number" in ts_retry
+    assert "put(key: number, value: number): void" in ts_retry
+    assert "private helper" not in ts_retry
+    assert "this.secret" not in ts_retry
+    assert "return this.secret" not in ts_retry
+
+    assert "class Node:" not in py_retry
+    assert "class MinStack:" in py_retry
+    assert "def __init__(self) -> None:" in py_retry
+    assert "def push(self, value: int) -> None:" in py_retry
+    assert "def top(self) -> int:" in py_retry
+    assert "def _secret" not in py_retry
+    assert "return 99" not in py_retry
+    assert "LRUCache" in ts_attempt.test_path.read_text(encoding="utf-8")
+    assert "MinStack" in py_attempt.test_path.read_text(encoding="utf-8")
+
+
+def test_retry_copies_tests_and_reports_an_isolated_test_command(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts", "0001", "one")
+    test_path = directory / "p_0001_one.test.ts"
+    test_path.write_text(
+        'import { solve } from "./p_0001_one.js";\n'
+        'test("example", () => expect(solve(1)).toBe(1));\n',
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0001")
+
+    assert attempt.test_path is not None
+    assert attempt.test_path.read_text(encoding="utf-8") == test_path.read_text(encoding="utf-8")
+    assert attempt.test_command[:6] == (
+        "pnpm",
+        "exec",
+        "vitest",
+        "run",
+        "--config",
+        "vitest.retry.config.ts",
+    )
+
+
+@pytest.mark.parametrize(
+    ("problem_id", "slug", "function_name"),
+    [
+        ("0092", "reverse_linked_list_ii", "reverseBetween"),
+        ("0206", "reverse_linked_list", "reverseList"),
+    ],
+)
+def test_retry_rewrites_shared_typescript_imports_for_isolated_tests(
+    tmp_path: Path, problem_id: str, slug: str, function_name: str
+) -> None:
+    shared = tmp_path / "src/typescript/data_structures/linked_list.ts"
+    shared.parent.mkdir(parents=True)
+    shared.write_text("export class LinkedList {}\n", encoding="utf-8")
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        problem_id,
+        slug,
+        source=f"export function {function_name}(value: number): number {{ return value + 99; }}\n",
+    )
+    test_path = directory / f"p_{problem_id}_{slug}.test.ts"
+    test_path.write_text(
+        f'import {{ LinkedList }} from "../data_structures/linked_list.js";\n'
+        f'import {{ {function_name} }} from "./p_{problem_id}_{slug}.js";\n'
+        'test("collects retry interfaces", () => {\n'
+        "    expect(LinkedList).toBeDefined();\n"
+        f'    expect({function_name}).toBeTypeOf("function");\n'
+        "});\n",
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, problem_id)
+    copied_test = attempt.test_path.read_text(encoding="utf-8")
+
+    assert "../../../src/typescript/data_structures/linked_list.js" in copied_test
+    assert f'import {{ {function_name} }} from "./p_{problem_id}_{slug}.js"' in copied_test
+    assert "return value + 99" not in attempt.path.read_text(encoding="utf-8")
+
+
+def test_retry_preserves_every_imported_typescript_solution_export(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0268",
+        "missing_number",
+        source=(
+            "export function missingNumberHashMap(nums: number[]): number { return 99; }\n"
+            "export function missingNumber(nums: number[]): number { return 98; }\n"
+        ),
+    )
+    test_path = directory / "p_0268_missing_number.test.ts"
+    test_path.write_text(
+        'import { missingNumber, missingNumberHashMap } from "./p_0268_missing_number.js";\n'
+        'test("collects both exports", () => {\n'
+        '    expect(missingNumber).toBeTypeOf("function");\n'
+        '    expect(missingNumberHashMap).toBeTypeOf("function");\n'
+        "});\n",
+        encoding="utf-8",
+    )
+
+    attempt = retry(tmp_path, "0268")
+    source = attempt.path.read_text(encoding="utf-8")
+
+    assert "export function missingNumberHashMap(nums: number[]): number" in source
+    assert "export function missingNumber(nums: number[]): number" in source
+    assert "return 99" not in source
+    assert "return 98" not in source
+
+
+def test_retry_refuses_unsupported_imported_typescript_shapes_before_writing(
+    tmp_path: Path,
+) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0300",
+        "unsupported_export",
+        source="export const answer = 42;\n",
+    )
+    (directory / "p_0300_unsupported_export.test.ts").write_text(
+        'import { answer } from "./p_0300_unsupported_export.js";\n', encoding="utf-8"
+    )
+
+    with pytest.raises(PracticeError, match="cannot safely recreate"):
+        retry(tmp_path, "0300")
+    assert not (tmp_path / ".lc/practice-attempts").exists()
+
+
+def test_cli_supports_root_and_language_before_or_after_command(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_problem(tmp_path, "ts", "0001", "one")
+    assert main(["--root", str(tmp_path), "today"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output[0]["problem_id"] == "0001"
+    assert main(["stats", "--root", str(tmp_path), "--language", "typescript"]) == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["total"] == 1
+
+
+def test_cli_human_mode_is_concise_and_hides_internal_paths(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_problem(
+        tmp_path,
+        "ts",
+        "0001",
+        "two_sum",
+        metadata='title = "Two Sum"\ndifficulty = "easy"\ntarget_minutes = 20\n',
+    )
+
+    assert main(["today", "--root", str(tmp_path), "--human"]) == 0
+
+    output = capsys.readouterr().out
+    assert "0001  ts  easy" in output
+    assert "20m  Two Sum" in output
+    assert str(tmp_path) not in output
+
+
+def test_cli_reports_expected_errors_without_traceback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert main(["--root", str(tmp_path), "finish", "--result", "solved"]) == 2
+    error = capsys.readouterr().err
+    assert "no active" in error
+    assert "Traceback" not in error
