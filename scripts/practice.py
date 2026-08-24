@@ -102,6 +102,11 @@ TS_CLASS_MEMBER_PATTERN = re.compile(
     r"\((?:[^(){}]|\{[^{}]*\}|\([^()]*\))*\)\s*(?::\s*.+)?$",
     re.DOTALL,
 )
+TS_CLASS_FIELD_PATTERN = re.compile(
+    r"^(?P<modifiers>(?:(?:public|private|protected|static|readonly|declare|abstract|override)\s+)*)"
+    r"(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)(?P<marker>[!?]?)\s*:\s*(?P<tail>.+)$",
+    re.DOTALL,
+)
 TS_EXPORT_DECLARATION_PATTERN = re.compile(
     r"(?m)^[ \t]*export\s+(?:default\s+)?"
     r"(?P<kind>const|let|var|type|interface|enum|namespace)\s+"
@@ -1589,11 +1594,14 @@ def _typescript_type_declarations(source: str) -> dict[str, str]:
 
 
 def _typescript_referenced_type_declarations(source: str, rendered: str) -> list[str]:
-    """Return transitive file-local declarations referenced by a retry interface."""
+    """Return transitive file-local type and class declarations used by a retry interface."""
 
     declarations = _typescript_type_declarations(source)
+    classes = {match["name"]: match for match in TS_CLASS_PATTERN.finditer(source)}
+    declared_classes = {match["name"] for match in TS_CLASS_PATTERN.finditer(rendered)}
     identifiers = set(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", rendered))
     selected: set[str] = set()
+    selected_classes: dict[str, str] = {}
     changed = True
     while changed:
         changed = False
@@ -1603,7 +1611,19 @@ def _typescript_referenced_type_declarations(source: str, rendered: str) -> list
             selected.add(name)
             identifiers.update(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", declaration))
             changed = True
-    return [declaration for name, declaration in declarations.items() if name in selected]
+        for name, class_match in classes.items():
+            if name not in identifiers or name in declared_classes or name in selected_classes:
+                continue
+            class_source = _typescript_class_retry_source(source, class_match)
+            if class_source is None:
+                continue
+            selected_classes[name] = class_source.strip()
+            identifiers.update(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", class_source))
+            changed = True
+    return [
+        *[declaration for name, declaration in declarations.items() if name in selected],
+        *selected_classes.values(),
+    ]
 
 
 def _typescript_class_member_header(header: str) -> str | None:
@@ -1620,6 +1640,87 @@ def _typescript_class_member_header(header: str) -> str | None:
     if "private" in modifiers or "protected" in modifiers:
         return None
     return header
+
+
+def _typescript_class_field_header(header: str) -> str | None:
+    """Return a public typed field, an empty private field, or None when unrecognized."""
+
+    header = re.sub(r"(?m)^[ \t]*@[^\n]*\n?", "", header)
+    header = re.sub(r"(?m)^[ \t]*(?://|/\*|\*|\*/)[^\n]*\n?", "", header)
+    header = " ".join(header.split())
+    match = TS_CLASS_FIELD_PATTERN.fullmatch(header)
+    if match is None:
+        return None
+    modifiers = match["modifiers"].split()
+    if "private" in modifiers or "protected" in modifiers:
+        return ""
+    field_type = match["tail"].strip()
+    stack: list[str] = []
+    for index, character in enumerate(field_type):
+        if character in "([{<":
+            stack.append({"(": ")", "[": "]", "{": "}", "<": ">"}[character])
+        elif stack and character == stack[-1]:
+            stack.pop()
+        elif character == "=" and not stack and field_type[index : index + 2] != "=>":
+            field_type = field_type[:index].rstrip()
+            break
+    if not field_type:
+        return None
+    retained_modifiers = [item for item in modifiers if item in {"public", "static", "readonly"}]
+    marker = match["marker"]
+    if not marker and "static" not in retained_modifiers:
+        marker = "!"
+    prefix = " ".join(retained_modifiers)
+    if prefix:
+        prefix += " "
+    return f"{prefix}{match['name']}{marker}: {field_type}"
+
+
+def _typescript_class_fields(source: str, opening: int, closing: int) -> list[str]:
+    """Extract public typed fields from a class without copying their initializers."""
+
+    fields: list[str] = []
+    member_start = opening + 1
+    quote: str | None = None
+    escaped = False
+    index = opening + 1
+    while index < closing:
+        character = source[index]
+        next_character = source[index + 1] if index + 1 < len(source) else ""
+        if quote is not None:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == quote:
+                quote = None
+            index += 1
+            continue
+        if character == "/" and next_character == "/":
+            newline = source.find("\n", index + 2, closing)
+            index = closing if newline == -1 else newline + 1
+            continue
+        if character == "/" and next_character == "*":
+            end = source.find("*/", index + 2, closing)
+            index = closing if end == -1 else end + 2
+            continue
+        if character in {"'", '"', "`"}:
+            quote = character
+        elif character == "{":
+            member_closing = _typescript_matching_brace(source, index)
+            if member_closing is None or member_closing > closing:
+                break
+            if _typescript_class_member_header(source[member_start:index]) is not None:
+                member_start = member_closing + 1
+            index = member_closing
+        elif character in {";", "\n"}:
+            field = _typescript_class_field_header(source[member_start:index])
+            if field:
+                fields.append(field)
+            if character == ";" or field is not None or not source[member_start:index].strip():
+                member_start = index + 1
+        index += 1
+    return fields
 
 
 def _typescript_class_methods(source: str, opening: int, closing: int) -> list[str]:
@@ -1835,11 +1936,14 @@ def _typescript_class_retry_source(
     if closing is None:
         return None
     class_header = " ".join(class_match["header"].split())
+    fields = _typescript_class_fields(source, opening, closing)
     methods = _typescript_class_methods(source, opening, closing)
     rendered = [
         "/* Blank interview retry artifact. The accepted solution is intentionally not copied. */",
         f"{class_header} {{",
     ]
+    for field_header in fields:
+        rendered.append(f"    {field_header};")
     for method in methods:
         rendered.append(f"    {method} {{")
         if method.startswith("constructor"):
@@ -1847,7 +1951,7 @@ def _typescript_class_retry_source(
         else:
             rendered.append('        throw new Error("TODO: implement retry");')
         rendered.append("    }")
-    if not methods:
+    if not fields and not methods:
         rendered.append("    // TODO: recreate the public interface")
     rendered.append("}")
     return "\n".join(rendered) + "\n"
@@ -2072,7 +2176,8 @@ def _typescript_retry_source(problem: Problem) -> str:
             source, _typescript_class_match(source, problem)
         )
         if class_source is not None:
-            return class_source
+            dependencies = _typescript_referenced_type_declarations(source, class_source)
+            return "\n\n".join([*dependencies, class_source])
 
     signature = problem.metadata.signature
     if signature is None and source is not None:

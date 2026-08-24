@@ -768,6 +768,69 @@ def test_retry_balances_inline_object_types_in_class_methods(tmp_path: Path) -> 
     assert "value.key.length" not in source
 
 
+def test_retry_preserves_public_typescript_class_fields(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0008",
+        "tree_node",
+        source=(
+            "export class TreeNode {\n"
+            "    val: number\n"
+            "    public left: TreeNode | null = null\n"
+            "    private secret: number = 99;\n"
+            "    constructor(val: number) { this.val = val; this.left = null; }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0008_tree_node.test.ts").write_text(
+        'import { TreeNode } from "./p_0008_tree_node.js";\n'
+        'test("node", () => expect(new TreeNode(1).val).toBe(1));\n',
+        encoding="utf-8",
+    )
+
+    source = retry(tmp_path, "0008").path.read_text(encoding="utf-8")
+
+    assert "val!: number;" in source
+    assert "public left!: TreeNode | null;" in source
+    assert "secret" not in source
+    assert "this.val = val" not in source
+
+
+def test_retry_carries_referenced_typescript_helper_classes(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0297",
+        "codec",
+        source=(
+            "class TreeNode {\n"
+            "    val: number;\n"
+            "    constructor(val: number) { this.val = val; }\n"
+            "}\n\n"
+            "export class Codec {\n"
+            "    serialize(root: TreeNode | null): string { return String(root?.val); }\n"
+            "    deserialize(data: string): TreeNode | null { return new TreeNode(+data); }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0297_codec.test.ts").write_text(
+        'import { Codec } from "./p_0297_codec.js";\n'
+        'test("codec", () => expect(new Codec()).toBeDefined());\n',
+        encoding="utf-8",
+    )
+
+    source = retry(tmp_path, "0297").path.read_text(encoding="utf-8")
+
+    assert "class TreeNode" in source
+    assert "val!: number;" in source
+    assert "export class Codec" in source
+    assert "return String" not in source
+    assert "new TreeNode(+data)" not in source
+
+
 def test_retry_refuses_unsupported_imported_typescript_shapes_before_writing(
     tmp_path: Path,
 ) -> None:

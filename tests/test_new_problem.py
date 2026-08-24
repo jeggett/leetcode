@@ -168,6 +168,22 @@ def test_scaffolds_python_custom_type_starter_without_eager_annotation_errors(
     compile(contents, str(source), "exec")
 
 
+def test_scaffolds_async_typescript_starter_function(tmp_path: Path) -> None:
+    source, test, _ = create_problem(
+        tmp_path,
+        "ts",
+        "2621",
+        ["Sleep"],
+        details=ProblemDetails(
+            starter_code="async function sleep(millis: number): Promise<void> { return; }\n"
+        ),
+    )
+
+    contents = source.read_text(encoding="utf-8")
+    assert "export async function sleep(millis: number): Promise<void>" in contents
+    assert 'import { sleep } from "./p_2621_sleep.js"' in test.read_text(encoding="utf-8")
+
+
 @pytest.mark.parametrize("kind", ["class", "design"])
 def test_non_function_kind_requires_official_starter_code(tmp_path: Path, kind: str) -> None:
     with pytest.raises(ScaffoldError, match=rf"problem kind '{kind}'.*official starter code"):

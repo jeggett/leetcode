@@ -241,6 +241,17 @@ def test_full_metadata_validation_requires_every_problem_test(tmp_path: Path) ->
         validate_all_problem_metadata(tmp_path)
 
 
+def test_full_metadata_validation_rejects_duplicate_normalized_ids(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts")
+    duplicate = tmp_path / "src/typescript/p_1_duplicate"
+    duplicate.mkdir(parents=True)
+    (duplicate / "p_1_duplicate.ts").write_text("export function duplicate(): void {}\n")
+    (duplicate / "p_1_duplicate.test.ts").write_text("test.todo('duplicate');\n")
+
+    with pytest.raises(ReadyError, match="duplicate normalized problem ID 0001"):
+        validate_all_problem_metadata(tmp_path)
+
+
 def test_track_metadata_validation_rejects_invalid_repository_manifest(tmp_path: Path) -> None:
     track = tmp_path / "tracks/interview-core.toml"
     track.parent.mkdir(parents=True)
@@ -398,4 +409,6 @@ def test_staged_gate_rejects_deleted_required_source(tmp_path: Path) -> None:
 def test_pre_commit_hook_uses_staged_mode() -> None:
     hook = Path(__file__).resolve().parents[1] / ".husky/pre-commit"
 
-    assert "scripts/ready.py staged" in hook.read_text(encoding="utf-8")
+    contents = hook.read_text(encoding="utf-8")
+    assert "git diff --quiet -- scripts .husky/pre-commit" in contents
+    assert "scripts/ready.py staged" in contents

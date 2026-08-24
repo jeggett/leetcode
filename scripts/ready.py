@@ -164,6 +164,7 @@ def validate_all_problem_metadata(root: Path) -> None:
         language_root = root / "src" / directory_name
         if not language_root.is_dir():
             continue
+        seen_problem_ids: dict[str, Path] = {}
         for directory in sorted(language_root.iterdir()):
             match = directory_pattern.fullmatch(directory.name)
             if match is None or not directory.is_dir():
@@ -172,6 +173,12 @@ def validate_all_problem_metadata(root: Path) -> None:
                 problem_id = normalize_problem_id(match["problem_id"])
             except ProblemPathError as error:
                 raise ReadyError(f"invalid problem directory {directory}: {error}") from error
+            previous = seen_problem_ids.get(problem_id)
+            if previous is not None:
+                raise ReadyError(
+                    f"duplicate normalized problem ID {problem_id} for {previous} and {directory}"
+                )
+            seen_problem_ids[problem_id] = directory
             paths = ProblemPaths(language, problem_id, directory)
             try:
                 require_source_path(paths)

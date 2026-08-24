@@ -1,1 +1,6 @@
+if ! git diff --quiet -- scripts .husky/pre-commit; then
+    echo "Unstaged tooling edits make the staged quality gate unsafe; stage or discard them." >&2
+    exit 1
+fi
+
 mise exec -- uv run python scripts/ready.py staged
