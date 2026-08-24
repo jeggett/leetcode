@@ -98,7 +98,7 @@ TS_CLASS_PATTERN = re.compile(
 )
 TS_CLASS_MEMBER_PATTERN = re.compile(
     r"^(?:(?:(?:public|private|protected|static|readonly|abstract|override|async|get|set)\s+)*"
-    r")(?:constructor|[A-Za-z_$][A-Za-z0-9_$]*)"
+    r")(?:constructor|#?[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*<.*?>)?\s*"
     r"\((?:[^(){}]|\{[^{}]*\}|\([^()]*\))*\)\s*(?::\s*.+)?$",
     re.DOTALL,
@@ -1630,8 +1630,8 @@ def _typescript_referenced_type_declarations(source: str, rendered: str) -> list
     ]
 
 
-def _typescript_class_member_header(header: str) -> str | None:
-    """Normalize one top-level class member and return it when it is a method signature."""
+def _typescript_class_member_candidate(header: str) -> str | None:
+    """Normalize one top-level class member and return syntactic method candidates."""
 
     # Decorators and comments are not part of a retry interface.  Removing them also prevents
     # accepted implementation details from being copied into the scratch artifact.
@@ -1640,8 +1640,17 @@ def _typescript_class_member_header(header: str) -> str | None:
     header = " ".join(header.split())
     if not TS_CLASS_MEMBER_PATTERN.fullmatch(header):
         return None
+    return header
+
+
+def _typescript_class_member_header(header: str) -> str | None:
+    """Return a public method signature without copying private implementation details."""
+
+    header = _typescript_class_member_candidate(header)
+    if header is None:
+        return None
     modifiers = header.split("(", 1)[0].split()
-    if "private" in modifiers or "protected" in modifiers:
+    if "private" in modifiers or "protected" in modifiers or "#" in modifiers[-1]:
         return None
     return header
 
@@ -1714,7 +1723,7 @@ def _typescript_class_fields(source: str, opening: int, closing: int) -> list[st
             member_closing = _typescript_matching_brace(source, index)
             if member_closing is None or member_closing > closing:
                 break
-            if _typescript_class_member_header(source[member_start:index]) is not None:
+            if _typescript_class_member_candidate(source[member_start:index]) is not None:
                 member_start = member_closing + 1
             index = member_closing
         elif character in {";", "\n"}:
@@ -1758,12 +1767,14 @@ def _typescript_class_methods(source: str, opening: int, closing: int) -> list[s
         if character in {"'", '"', "`"}:
             quote = character
         elif character == "{":
-            member = _typescript_class_member_header(source[member_start:index])
+            candidate = source[member_start:index]
+            member = _typescript_class_member_header(candidate)
             member_closing = _typescript_matching_brace(source, index)
             if member_closing is None or member_closing > closing:
                 break
             if member is not None:
                 methods.append(member)
+            if _typescript_class_member_candidate(candidate) is not None:
                 member_start = member_closing + 1
             index = member_closing
         elif character == ";":
@@ -2057,24 +2068,27 @@ def _typescript_retry_exports(
     return "\n\n".join([*dependencies, rendered_source])
 
 
+def _python_self_contained_default(value: ast.expr) -> bool:
+    """Return whether a default expression needs no names from the accepted module."""
+
+    return all(
+        not isinstance(item, (ast.Name, ast.Attribute, ast.Call)) for item in ast.walk(value)
+    )
+
+
 def _python_method_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     """Render a Python function header from its AST while omitting its body."""
 
-    def self_contained_default(value: ast.expr) -> bool:
-        return all(
-            not isinstance(item, (ast.Name, ast.Attribute, ast.Call)) for item in ast.walk(value)
-        )
-
     arguments = copy.deepcopy(node.args)
     arguments.defaults = [
-        value if self_contained_default(value) else ast.Constant(value=Ellipsis)
+        value if _python_self_contained_default(value) else ast.Constant(value=Ellipsis)
         for value in arguments.defaults
     ]
     arguments.kw_defaults = [
         None
         if value is None
         else value
-        if self_contained_default(value)
+        if _python_self_contained_default(value)
         else ast.Constant(value=Ellipsis)
         for value in arguments.kw_defaults
     ]
@@ -2121,7 +2135,12 @@ def _python_dataclass_fields(class_node: ast.ClassDef) -> list[str]:
             continue
         declaration = f"{node.target.id}: {ast.unparse(node.annotation)}"
         if node.value is not None:
-            declaration += f" = {ast.unparse(node.value)}"
+            value = (
+                node.value
+                if _python_self_contained_default(node.value)
+                else ast.Constant(value=Ellipsis)
+            )
+            declaration += f" = {ast.unparse(value)}"
         rendered.append(declaration)
     return rendered
 

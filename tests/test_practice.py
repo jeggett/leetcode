@@ -526,6 +526,32 @@ class MinStack:
     assert "MinStack" in py_attempt.test_path.read_text(encoding="utf-8")
 
 
+def test_retry_advances_past_private_typescript_methods(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0009",
+        "private_first",
+        source=(
+            "export class Runner {\n"
+            "    private helper(): number { return 1; }\n"
+            "    #secret(): number { return 2; }\n"
+            "    run(value: number): number { return value; }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0009_private_first.test.ts").write_text(
+        'import { Runner } from "./p_0009_private_first.js";\n', encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0009").path.read_text(encoding="utf-8")
+
+    assert "helper" not in source
+    assert "secret" not in source
+    assert "run(value: number): number" in source
+
+
 def test_retry_recreates_every_python_class_imported_by_the_test(tmp_path: Path) -> None:
     directory = make_problem(
         tmp_path,
@@ -630,6 +656,31 @@ def test_retry_preserves_python_dataclass_constructor_fields(tmp_path: Path) -> 
     assert "val: int" in source
     assert node.val == 1
     assert node.left is None
+
+
+def test_retry_replaces_unresolved_python_dataclass_defaults(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0302",
+        "dataclass_default",
+        source=(
+            "from dataclasses import dataclass\n\n"
+            "DEFAULT = 7\n\n"
+            "@dataclass\n"
+            "class Item:\n"
+            "    value: int = DEFAULT\n"
+        ),
+    )
+    (directory / "test_p_0302_dataclass_default.py").write_text(
+        "from p_0302_dataclass_default import Item\n", encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0302", "py").path.read_text(encoding="utf-8")
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+
+    assert "value: int = ..." in source
 
 
 def test_retry_preserves_python_property_setter_and_deleter(tmp_path: Path) -> None:

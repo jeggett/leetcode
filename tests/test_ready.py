@@ -252,6 +252,14 @@ def test_full_metadata_validation_rejects_duplicate_normalized_ids(tmp_path: Pat
         validate_all_problem_metadata(tmp_path)
 
 
+def test_full_metadata_validation_rejects_malformed_problem_directories(tmp_path: Path) -> None:
+    malformed = tmp_path / "src/typescript/p_0001_two-sum"
+    malformed.mkdir(parents=True)
+
+    with pytest.raises(ReadyError, match="invalid problem directory name"):
+        validate_all_problem_metadata(tmp_path)
+
+
 def test_track_metadata_validation_rejects_invalid_repository_manifest(tmp_path: Path) -> None:
     track = tmp_path / "tracks/interview-core.toml"
     track.parent.mkdir(parents=True)

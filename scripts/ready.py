@@ -167,7 +167,11 @@ def validate_all_problem_metadata(root: Path) -> None:
         seen_problem_ids: dict[str, Path] = {}
         for directory in sorted(language_root.iterdir()):
             match = directory_pattern.fullmatch(directory.name)
-            if match is None or not directory.is_dir():
+            if not directory.is_dir():
+                continue
+            if match is None:
+                if directory.name.startswith("p_"):
+                    raise ReadyError(f"invalid problem directory name: {directory}")
                 continue
             try:
                 problem_id = normalize_problem_id(match["problem_id"])
