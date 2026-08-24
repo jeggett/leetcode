@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import copy
 import fcntl
 import json
 import math
@@ -98,7 +99,7 @@ TS_CLASS_PATTERN = re.compile(
 TS_CLASS_MEMBER_PATTERN = re.compile(
     r"^(?:(?:(?:public|private|protected|static|readonly|abstract|override|async|get|set)\s+)*"
     r")(?:constructor|[A-Za-z_$][A-Za-z0-9_$]*)"
-    r"(?:\s*<[^{}()]*>)?\s*"
+    r"(?:\s*<.*?>)?\s*"
     r"\((?:[^(){}]|\{[^{}]*\}|\([^()]*\))*\)\s*(?::\s*.+)?$",
     re.DOTALL,
 )
@@ -2059,8 +2060,26 @@ def _typescript_retry_exports(
 def _python_method_signature(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
     """Render a Python function header from its AST while omitting its body."""
 
+    def self_contained_default(value: ast.expr) -> bool:
+        return all(
+            not isinstance(item, (ast.Name, ast.Attribute, ast.Call)) for item in ast.walk(value)
+        )
+
+    arguments = copy.deepcopy(node.args)
+    arguments.defaults = [
+        value if self_contained_default(value) else ast.Constant(value=Ellipsis)
+        for value in arguments.defaults
+    ]
+    arguments.kw_defaults = [
+        None
+        if value is None
+        else value
+        if self_contained_default(value)
+        else ast.Constant(value=Ellipsis)
+        for value in arguments.kw_defaults
+    ]
     prefix = "async def" if isinstance(node, ast.AsyncFunctionDef) else "def"
-    signature = f"{prefix} {node.name}({ast.unparse(node.args)})"
+    signature = f"{prefix} {node.name}({ast.unparse(arguments)})"
     if node.returns is not None:
         signature += f" -> {ast.unparse(node.returns)}"
     return " ".join(signature.split())
@@ -2707,13 +2726,13 @@ def _json_default(value: Any) -> str:
     raise TypeError(f"not JSON serializable: {type(value).__name__}")
 
 
-def _common_options(parser: argparse.ArgumentParser) -> None:
+def _common_options(parser: argparse.ArgumentParser, *, allow_all: bool = False) -> None:
     parser.add_argument("--root", type=Path, default=argparse.SUPPRESS, help="repository root")
     parser.add_argument(
         "--language",
         "-l",
         default=argparse.SUPPRESS,
-        choices=("ts", "typescript", "py", "python", "all"),
+        choices=("ts", "typescript", "py", "python", *(("all",) if allow_all else ())),
         help="problem language (default: ts)",
     )
     parser.add_argument(
@@ -2742,7 +2761,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     command = subparsers.add_parser("today", help="select due then unseen problems")
-    _common_options(command)
+    _common_options(command, allow_all=True)
     command.add_argument("--limit", type=int, default=1)
 
     command = subparsers.add_parser("start", help="start a practice session")
@@ -2767,7 +2786,7 @@ def build_parser() -> argparse.ArgumentParser:
     command.add_argument("--session-id", default=None)
 
     command = subparsers.add_parser("review", help="show due problems or start one in review mode")
-    _common_options(command)
+    _common_options(command, allow_all=True)
     command.add_argument("problem_id", nargs="?")
     command.add_argument("--problem-id", "--id", dest="explicit_problem_id", default=None)
     command.add_argument("--limit", type=int, default=None)
@@ -2778,14 +2797,14 @@ def build_parser() -> argparse.ArgumentParser:
     command.add_argument("--problem-id", "--id", dest="explicit_problem_id", default=None)
 
     command = subparsers.add_parser("list", help="list practice status for discovered problems")
-    _common_options(command)
+    _common_options(command, allow_all=True)
     filters = command.add_mutually_exclusive_group()
     filters.add_argument("--filter", choices=sorted(VALID_FILTERS), default="all")
     filters.add_argument("--due", action="store_const", const="due", dest="filter")
     filters.add_argument("--unseen", action="store_const", const="unseen", dest="filter")
 
     command = subparsers.add_parser("stats", help="show aggregate practice statistics")
-    _common_options(command)
+    _common_options(command, allow_all=True)
     return parser
 
 
@@ -2910,10 +2929,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         configured_language = load_config(root).primary_language
         language = getattr(arguments, "language", None) or configured_language
         human = getattr(arguments, "human", False)
+        problem_id = getattr(arguments, "explicit_problem_id", None) or getattr(
+            arguments, "problem_id", None
+        )
+        all_languages_allowed = arguments.command in {"today", "list", "stats"} or (
+            arguments.command == "review" and problem_id is None
+        )
+        if language == "all" and not all_languages_allowed:
+            raise PracticeError(
+                "--language all is only supported by today, list, stats, and review without an ID"
+            )
         if arguments.command == "today":
             _print_result(today(root, language, limit=arguments.limit), human=human)
         elif arguments.command == "start":
-            problem_id = arguments.explicit_problem_id or arguments.problem_id
             _print_result(start(root, problem_id, language, mode=arguments.mode), human=human)
         elif arguments.command == "finish":
             _print_result(
@@ -2928,7 +2956,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 human=human,
             )
         elif arguments.command == "review":
-            problem_id = arguments.explicit_problem_id or arguments.problem_id
             reviewed = review(
                 root,
                 problem_id,
@@ -2937,7 +2964,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
             _print_result(reviewed, human=human)
         elif arguments.command == "retry":
-            problem_id = arguments.explicit_problem_id or arguments.problem_id
             if problem_id is None:
                 raise PracticeError("retry requires a problem ID")
             _print_result(retry(root, problem_id, language), human=human)

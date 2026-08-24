@@ -1419,6 +1419,7 @@ def start_problem(
             )
         if selected_language is None:
             raise LeetError("could not determine the problem language")
+        _require_new_branch(root, target_branch, run)
         result = _lifecycle_result(
             selected_language,
             problem_id,

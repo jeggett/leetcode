@@ -398,6 +398,40 @@ def test_retry_creates_blank_ts_and_python_artifacts_without_copying_solution(
     assert "def secret" in py_attempt.path.read_text(encoding="utf-8")
 
 
+def test_retry_replaces_unresolved_python_method_defaults(tmp_path: Path) -> None:
+    make_problem(
+        tmp_path,
+        "py",
+        "0003",
+        "defaults",
+        source=(
+            'SEP = ":"\n\n'
+            "class Formatter:\n"
+            "    def __init__(self, separator: str = SEP):\n"
+            "        self.separator = separator\n"
+        ),
+    )
+
+    source = retry(tmp_path, "0003", "py").path.read_text(encoding="utf-8")
+
+    assert "separator: str=..." in source
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+    namespace["Formatter"]()
+
+
+def test_all_language_is_restricted_to_reporting_commands(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit):
+        build_parser().parse_args(["retry", "0001", "--language", "all"])
+
+    assert main(["--root", str(tmp_path), "--language", "all", "retry", "0001"]) == 2
+    assert "only supported" in capsys.readouterr().err
+
+    assert build_parser().parse_args(["stats", "--language", "all"]).language == "all"
+
+
 def test_retry_preserves_class_interfaces_without_copying_design_bodies(tmp_path: Path) -> None:
     ts_source = """class Node {
     constructor(value: number) {
@@ -862,6 +896,29 @@ def test_retry_balances_inline_object_types_in_class_methods(tmp_path: Path) -> 
 
     assert "run(value: { key: string }): { count: number }" in source
     assert "value.key.length" not in source
+
+
+def test_retry_preserves_object_constrained_class_method_generics(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0008",
+        "generic_method",
+        source=(
+            "export class Runner {\n"
+            "    run<T extends { value: number }>(item: T): T { return item; }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0008_generic_method.test.ts").write_text(
+        'import { Runner } from "./p_0008_generic_method.js";\n', encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0008").path.read_text(encoding="utf-8")
+
+    assert "run<T extends { value: number }>(item: T): T" in source
+    assert "return item" not in source
 
 
 def test_retry_preserves_public_typescript_class_fields(tmp_path: Path) -> None:

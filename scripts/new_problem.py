@@ -363,7 +363,7 @@ def starter_export_name(language: str, starter_code: str) -> str | None:
     """Return the first top-level callable name exposed by official starter code."""
     if language == "ts":
         match = re.search(
-            r"(?m)^[ \t]*(?:export[ \t]+)?(?:async[ \t]+function|function|class)[ \t]+"
+            r"(?m)^[ \t]*(?:export[ \t]+)?(?:(?:async[ \t]+)?function[ \t]*\*?[ \t]+|class[ \t]+)"
             r"([A-Za-z_$][A-Za-z0-9_$]*)",
             starter_code,
         )
@@ -390,7 +390,7 @@ def render_starter_solution(
     code = starter_code.strip() + "\n"
     if language == "ts":
         code = re.sub(
-            rf"(?m)^([ \t]*)(?=(?:async[ \t]+function|function|class)[ \t]+"
+            rf"(?m)^([ \t]*)(?=(?:(?:async[ \t]+)?function[ \t]*\*?[ \t]+|class[ \t]+)"
             rf"{re.escape(export_name)}\b)",
             r"\1export ",
             code,

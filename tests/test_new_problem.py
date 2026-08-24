@@ -184,6 +184,25 @@ def test_scaffolds_async_typescript_starter_function(tmp_path: Path) -> None:
     assert 'import { sleep } from "./p_2621_sleep.js"' in test.read_text(encoding="utf-8")
 
 
+def test_scaffolds_typescript_generator_starter_function(tmp_path: Path) -> None:
+    source, test, _ = create_problem(
+        tmp_path,
+        "ts",
+        "2645",
+        ["Generator"],
+        details=ProblemDetails(
+            starter_code="function* fibGenerator(): Generator<number> { yield 1; }\n"
+        ),
+    )
+
+    assert "export function* fibGenerator(): Generator<number>" in source.read_text(
+        encoding="utf-8"
+    )
+    assert 'import { fibGenerator } from "./p_2645_generator.js"' in test.read_text(
+        encoding="utf-8"
+    )
+
+
 @pytest.mark.parametrize("kind", ["class", "design"])
 def test_non_function_kind_requires_official_starter_code(tmp_path: Path, kind: str) -> None:
     with pytest.raises(ScaffoldError, match=rf"problem kind '{kind}'.*official starter code"):

@@ -257,6 +257,22 @@ def test_start_restores_original_branch_when_base_validation_fails(tmp_path: Pat
     assert ("git", "switch", original_branch) in git.calls
 
 
+def test_start_rejects_remote_branch_for_problem_already_on_base(tmp_path: Path) -> None:
+    target_branch = "feat/p-0035-search-insert-position"
+    make_problem(tmp_path, "ts")
+    git = LifecycleGit(tmp_path, branch="main")
+
+    def remote_collision(command: Sequence[str], cwd: Path) -> lc.CommandResult:
+        if tuple(command) == ("git", "for-each-ref", "--format=%(refname)", "refs/remotes"):
+            return lc.CommandResult(0, f"refs/remotes/origin/{target_branch}\n")
+        return git(command, cwd)
+
+    with pytest.raises(lc.LeetError, match="branch already exists on a remote"):
+        lc.start_problem(tmp_path, "ts", "0035", run=remote_collision)
+
+    assert ("git", "switch", "-c", target_branch) not in git.calls
+
+
 def test_start_restores_original_branch_when_existing_target_is_incomplete(
     tmp_path: Path,
 ) -> None:
