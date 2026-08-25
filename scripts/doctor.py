@@ -32,14 +32,14 @@ VERSION_PATTERN = re.compile(r"v?(\d+(?:\.\d+){0,2})")
 PACKAGE_MANAGER_PATTERN = re.compile(r"pnpm@v?(\d+(?:\.\d+){0,2})")
 
 NODE_DEPENDENCIES = ("@biomejs/biome", "typescript", "vitest", "lefthook")
-PYTHON_DEPENDENCIES = ("pytest", "pytest-timeout", "pytest-watcher", "ruff")
+PYTHON_DEPENDENCIES = ("pytest", "ruff")
 # Compatibility names retained for callers that used the original
 # representative-dependency checks.
 NODE_DEPENDENCY = "vitest"
 PYTHON_DEPENDENCY = "pytest"
 
 LEFTHOOK_CONFIG = Path("lefthook.yml")
-LEFTHOOK_COMMAND = "mise exec -- uv run python scripts/ready.py staged"
+LEFTHOOK_COMMAND = "mise exec -- pnpm ready"
 HUSKY_HOOK_LAUNCHER_PATTERN = re.compile(
     r"""(?mx)
     ^\s*(?:\.|source)\s+

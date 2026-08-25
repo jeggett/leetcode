@@ -242,6 +242,3 @@ jspm_packages/
 .pnp.*
 
 .idea/
-
-# Local interview-practice sessions and history
-.lc/

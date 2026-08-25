@@ -1,6 +1,5 @@
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 import pytest
@@ -13,12 +12,10 @@ from scripts.check_incomplete import (
     incomplete_scaffolds,
 )
 from scripts.new_problem import (
-    ProblemDetails,
     ScaffoldError,
     create_problem,
     normalize_problem_id,
     parse_arguments,
-    parse_request,
     slugify,
     suggested_branch,
     validate_signature,
@@ -85,191 +82,6 @@ def test_creates_typescript_layout(tmp_path: Path) -> None:
     assert test.name == "p_0092_reverse_linked_list_ii.test.ts"
     assert 'from "./p_0092_reverse_linked_list_ii.js"' in test.read_text(encoding="utf-8")
     assert "test.skip" in test.read_text(encoding="utf-8")
-    metadata = tomllib.loads((source.parent / "problem.toml").read_text(encoding="utf-8"))
-    assert metadata == {
-        "id": "0092",
-        "title": "Reverse Linked List II",
-        "language": "ts",
-        "kind": "function",
-        "target_minutes": 35,
-        "topics": [],
-    }
-    assert "## Key invariant" in (source.parent / "notes.md").read_text(encoding="utf-8")
-
-
-def test_metadata_preserves_non_bmp_unicode_scalars(tmp_path: Path) -> None:
-    source, _, _ = create_problem(
-        tmp_path,
-        "ts",
-        "1",
-        ["Happy Path 😀"],
-        details=ProblemDetails(topics=("Smile 😀",)),
-    )
-
-    metadata_text = (source.parent / "problem.toml").read_text(encoding="utf-8")
-    metadata = tomllib.loads(metadata_text)
-
-    assert "\\ud83d" not in metadata_text
-    assert metadata["title"] == "Happy Path 😀"
-    assert metadata["topics"] == ["Smile 😀"]
-
-
-def test_scaffolds_study_metadata_examples_and_official_design_starter(tmp_path: Path) -> None:
-    source, test, _ = create_problem(
-        tmp_path,
-        "ts",
-        "155",
-        ["Min Stack"],
-        "https://leetcode.com/problems/min-stack/",
-        details=ProblemDetails(
-            difficulty="Medium",
-            topics=("Stack", "Design"),
-            kind="design",
-            starter_code="class MinStack {\n    push(value: number): void {}\n}\n",
-            examples=("[MinStack, push] -> [null, null]",),
-            target_minutes=30,
-        ),
-    )
-
-    assert "export class MinStack" in source.read_text(encoding="utf-8")
-    assert "TODO: implement the solution" in source.read_text(encoding="utf-8")
-    assert "import { MinStack }" in test.read_text(encoding="utf-8")
-    metadata = tomllib.loads((source.parent / "problem.toml").read_text(encoding="utf-8"))
-    assert metadata["difficulty"] == "Medium"
-    assert metadata["topics"] == ["Stack", "Design"]
-    assert metadata["kind"] == "design"
-    assert metadata["target_minutes"] == 30
-    notes = (source.parent / "notes.md").read_text(encoding="utf-8")
-    assert "[MinStack, push]" in notes
-
-
-def test_scaffolds_python_custom_type_starter_without_eager_annotation_errors(
-    tmp_path: Path,
-) -> None:
-    source, test, _ = create_problem(
-        tmp_path,
-        "py",
-        "206",
-        ["Reverse Linked List"],
-        details=ProblemDetails(
-            kind="class",
-            starter_code=(
-                "class Solution:\n"
-                "    def reverseList(self, head: ListNode | None) -> ListNode | None:\n"
-                "        pass\n"
-            ),
-        ),
-    )
-
-    contents = source.read_text(encoding="utf-8")
-    assert "from __future__ import annotations" in contents
-    assert "class Solution:" in contents
-    assert "from p_0206_reverse_linked_list import Solution" in test.read_text(encoding="utf-8")
-    compile(contents, str(source), "exec")
-
-
-def test_scaffolds_async_typescript_starter_function(tmp_path: Path) -> None:
-    source, test, _ = create_problem(
-        tmp_path,
-        "ts",
-        "2621",
-        ["Sleep"],
-        details=ProblemDetails(
-            starter_code="async function sleep(millis: number): Promise<void> { return; }\n"
-        ),
-    )
-
-    contents = source.read_text(encoding="utf-8")
-    assert "export async function sleep(millis: number): Promise<void>" in contents
-    assert 'import { sleep } from "./p_2621_sleep.js"' in test.read_text(encoding="utf-8")
-
-
-def test_scaffolds_typescript_generator_starter_function(tmp_path: Path) -> None:
-    source, test, _ = create_problem(
-        tmp_path,
-        "ts",
-        "2645",
-        ["Generator"],
-        details=ProblemDetails(
-            starter_code="function* fibGenerator(): Generator<number> { yield 1; }\n"
-        ),
-    )
-
-    assert "export function* fibGenerator(): Generator<number>" in source.read_text(
-        encoding="utf-8"
-    )
-    assert 'import { fibGenerator } from "./p_2645_generator.js"' in test.read_text(
-        encoding="utf-8"
-    )
-
-
-def test_starter_fallback_prefers_function_after_helper_class(tmp_path: Path) -> None:
-    source, test, _ = create_problem(
-        tmp_path,
-        "ts",
-        "2",
-        ["Add Two Numbers"],
-        details=ProblemDetails(
-            starter_code=(
-                "class ListNode { constructor(public val: number) {} }\n"
-                "function addTwoNumbers(left: ListNode): ListNode { return left; }\n"
-            )
-        ),
-    )
-
-    assert "export function addTwoNumbers" in source.read_text(encoding="utf-8")
-    assert 'import { addTwoNumbers } from "./p_0002_add_two_numbers.js"' in test.read_text(
-        encoding="utf-8"
-    )
-
-
-@pytest.mark.parametrize("kind", ["class", "design"])
-def test_non_function_kind_requires_official_starter_code(tmp_path: Path, kind: str) -> None:
-    with pytest.raises(ScaffoldError, match=rf"problem kind '{kind}'.*official starter code"):
-        create_problem(
-            tmp_path,
-            "ts",
-            "155",
-            ["Min Stack"],
-            details=ProblemDetails(kind=kind),
-        )
-
-    assert not (tmp_path / "src").exists()
-
-
-@pytest.mark.parametrize("kind", ["class", "design"])
-def test_main_rejects_manual_non_function_kind(
-    tmp_path: Path,
-    kind: str,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr(new_problem, "__file__", str(tmp_path / "scripts" / "new_problem.py"))
-
-    assert new_problem.main(["ts", "155", "Min Stack", "--kind", kind]) == 1
-
-    assert "requires official starter code" in capsys.readouterr().err
-    assert not (tmp_path / "src").exists()
-
-
-@pytest.mark.parametrize(
-    ("details", "message"),
-    [
-        (ProblemDetails(difficulty=""), "difficulty"),
-        (ProblemDetails(target_minutes=True), "target minutes"),
-        (ProblemDetails(starter_code="   "), "starter code"),
-        (ProblemDetails(topics=("Stack", 1)), "topics"),
-        (ProblemDetails(topics=("Stack", "   ")), "topics"),
-        (ProblemDetails(examples=("push(1)", None)), "examples"),
-    ],
-)
-def test_rejects_invalid_problem_metadata(
-    tmp_path: Path, details: ProblemDetails, message: str
-) -> None:
-    with pytest.raises(ScaffoldError, match=message):
-        create_problem(tmp_path, "ts", "155", ["Min Stack"], details=details)
-
-    assert not (tmp_path / "src").exists()
 
 
 def test_creates_signature_aware_typescript_scaffold(tmp_path: Path) -> None:
@@ -304,6 +116,7 @@ def test_generated_generic_typescript_signature_typechecks(tmp_path: Path) -> No
             "pnpm",
             "exec",
             "tsc",
+            "--ignoreConfig",
             "--noEmit",
             "--strict",
             "--target",
@@ -433,34 +246,6 @@ def test_parses_signature_after_title() -> None:
     )
 
 
-def test_parses_manual_study_metadata() -> None:
-    request = parse_request(
-        [
-            "ts",
-            "155",
-            "Min Stack",
-            "--difficulty",
-            "Medium",
-            "--topic",
-            "Stack",
-            "--topic",
-            "Design",
-            "--kind",
-            "design",
-            "--target-minutes",
-            "30",
-            "--example",
-            "push(1)",
-        ]
-    )
-
-    assert request.difficulty == "Medium"
-    assert request.topics == ("Stack", "Design")
-    assert request.kind == "design"
-    assert request.target_minutes == 30
-    assert request.examples == ("push(1)",)
-
-
 @pytest.mark.parametrize(
     ("language", "signature", "name"),
     [
@@ -525,7 +310,7 @@ def test_main_prints_typescript_watch_command(
 
     output = capsys.readouterr().out
     assert "lc test ts 0008" in output
-    assert "lc watch ts 0008" in output
+    assert "lc watch 0008" in output
 
 
 def test_usage_mentions_signature_option() -> None:

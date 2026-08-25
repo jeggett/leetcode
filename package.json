@@ -11,11 +11,7 @@
     "test:ts": "vitest run",
     "test:ts:watch": "vitest",
     "test:py": "uv run pytest",
-    "test:py:solutions": "uv run pytest src/python",
-    "test:py:tools": "uv run pytest tests",
-    "test:py:watch": "uv run ptw . --runner 'pytest --capture=sys' --now",
     "incomplete": "uv run python scripts/check_incomplete.py",
-    "metadata": "uv run python scripts/ready.py metadata",
     "lint": "pnpm run lint:ts && pnpm run lint:py",
     "lint:ts": "biome lint src/typescript vitest.config.ts",
     "lint:py": "uv run ruff check .",
@@ -26,12 +22,9 @@
     "format:check:ts": "biome format src/typescript vitest.config.ts",
     "format:check:py": "uv run ruff format --check .",
     "typecheck": "tsc --noEmit",
-    "compat": "uv run python scripts/compat.py && pnpm run typecheck",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
-    "ready": "pnpm run ready:all",
-    "ready:all": "pnpm run incomplete && pnpm run metadata && pnpm run format:check && pnpm run lint && pnpm run test && pnpm run compat",
-    "ready:changed": "uv run python scripts/ready.py changed",
-    "practice": "uv run python scripts/practice.py",
+    "ready": "pnpm run incomplete && pnpm run check",
+    "ready:all": "pnpm run ready",
     "doctor": "python scripts/doctor.py",
     "prepare": "python scripts/install_hooks.py"
   },
@@ -55,7 +48,7 @@
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
     "lefthook": "2.1.10",
-    "typescript": "5.7.3",
+    "typescript": "7.0.2",
     "vitest": "4.1.10"
   },
   "packageManager": "pnpm@11.20.0"

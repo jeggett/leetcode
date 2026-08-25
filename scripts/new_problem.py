@@ -4,12 +4,10 @@
 from __future__ import annotations
 
 import ast
-import json
 import keyword
 import re
 import sys
 import unicodedata
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
@@ -34,34 +32,6 @@ TYPESCRIPT_RESERVED_IDENTIFIERS = frozenset(
 SIGNATURE_LINE_SEPARATORS = "\r\n\u2028\u2029"
 TYPESCRIPT_FORBIDDEN_SIGNATURE_TOKENS = ("//", "/*", "*/", "#", ";", "{", "}", "=>")
 PROBLEM_DIRECTORY_NAME = re.compile(r"^p_(?P<problem_number>[0-9]+)_.+$")
-
-
-@dataclass(frozen=True)
-class ProblemDetails:
-    """Optional study metadata and official starter material for a scaffold."""
-
-    difficulty: str | None = None
-    topics: tuple[str, ...] = ()
-    kind: str = "function"
-    starter_code: str | None = None
-    examples: tuple[str, ...] = ()
-    target_minutes: int | None = None
-
-
-@dataclass(frozen=True)
-class ScaffoldRequest:
-    """Complete manual-scaffold command request."""
-
-    language: str
-    problem_number: str
-    title_parts: tuple[str, ...]
-    problem_url: str | None = None
-    signature: str | None = None
-    difficulty: str | None = None
-    topics: tuple[str, ...] = ()
-    kind: str = "function"
-    examples: tuple[str, ...] = ()
-    target_minutes: int | None = None
 
 
 def normalize_problem_id(value: str) -> str:
@@ -359,187 +329,6 @@ test.skip("Generated scaffold test", () => {{
 """
 
 
-def starter_export_name(language: str, starter_code: str) -> str | None:
-    """Return the first top-level callable name exposed by official starter code."""
-    if language == "ts":
-        match = re.search(
-            r"(?m)^[ \t]*(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]*\*?[ \t]+"
-            r"([A-Za-z_$][A-Za-z0-9_$]*)",
-            starter_code,
-        )
-        if match is None:
-            match = re.search(
-                r"(?m)^[ \t]*(?:export[ \t]+)?class[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)",
-                starter_code,
-            )
-    else:
-        match = re.search(
-            r"(?m)^[ \t]*class[ \t]+([A-Za-z_][A-Za-z0-9_]*)",
-            starter_code,
-        )
-    return match.group(1) if match else None
-
-
-def render_starter_solution(
-    language: str,
-    problem_id: str,
-    title: str,
-    starter_code: str,
-    problem_url: str | None,
-) -> tuple[str, str]:
-    """Render unsupported function/class shapes without discarding official starter code."""
-    export_name = starter_export_name(language, starter_code)
-    if export_name is None:
-        raise ScaffoldError(f"official {language} starter code has no callable function or class")
-
-    code = starter_code.strip() + "\n"
-    if language == "ts":
-        code = re.sub(
-            rf"(?m)^([ \t]*)(?=(?:(?:async[ \t]+)?function[ \t]*\*?[ \t]+|class[ \t]+)"
-            rf"{re.escape(export_name)}\b)",
-            r"\1export ",
-            code,
-            count=1,
-        )
-        header = (
-            f"// LeetCode {problem_id}: {title}.\n"
-            f"// Problem URL: {problem_url or 'TODO: add problem URL'}\n"
-            "/* time: TODO, space: TODO */\n"
-            "// TODO: implement the solution\n"
-        )
-    else:
-        header = (
-            f'"""LeetCode {problem_id}."""\n\n'
-            "from __future__ import annotations\n\n"
-            f"# Problem: {title}\n"
-            f"# Problem URL: {problem_url or 'TODO: add problem URL'}\n"
-            "# time: TODO, space: TODO\n"
-            "# TODO: implement the solution\n\n"
-        )
-    return header + code, export_name
-
-
-def render_starter_test(language: str, stem: str, export_name: str) -> str:
-    """Render an explicit placeholder test for class/custom-type starter snippets."""
-    if language == "ts":
-        return f"""import {{ {export_name} }} from "./{stem}.js";
-
-// GENERATED_SCAFFOLD_TEST
-test.skip("TODO: add examples and edge cases", () => {{
-    expect({export_name}).toBeDefined();
-}});
-"""
-    return f"""import pytest
-
-from {stem} import {export_name}
-
-
-# GENERATED_SCAFFOLD_TEST
-@pytest.mark.skip(reason="TODO: add examples and edge cases")
-def test_{stem}() -> None:
-    assert {export_name} is not None
-"""
-
-
-def default_target_minutes(difficulty: str | None) -> int:
-    """Return a practical interview timebox when metadata provides a difficulty."""
-    return {"easy": 20, "medium": 35, "hard": 50}.get((difficulty or "").lower(), 35)
-
-
-def validate_problem_details(details: ProblemDetails) -> None:
-    """Reject metadata that would create a misleading or unreadable scaffold."""
-    if not isinstance(details.kind, str) or details.kind not in {"function", "class", "design"}:
-        raise ScaffoldError("problem kind must be 'function', 'class', or 'design'")
-    if details.difficulty is not None and (
-        not isinstance(details.difficulty, str)
-        or details.difficulty.lower() not in {"easy", "medium", "hard"}
-    ):
-        raise ScaffoldError("difficulty must be Easy, Medium, or Hard")
-    if details.target_minutes is not None and (
-        not isinstance(details.target_minutes, int)
-        or isinstance(details.target_minutes, bool)
-        or details.target_minutes <= 0
-    ):
-        raise ScaffoldError("target minutes must be a positive integer")
-    if details.starter_code is not None and (
-        not isinstance(details.starter_code, str) or not details.starter_code.strip()
-    ):
-        raise ScaffoldError("official starter code must be non-empty text")
-    if details.kind != "function" and details.starter_code is None:
-        raise ScaffoldError(
-            f"problem kind '{details.kind}' requires official starter code; "
-            "use the URL workflow instead of a manual scaffold"
-        )
-    if not isinstance(details.topics, tuple) or any(
-        not isinstance(topic, str) or not topic.strip() for topic in details.topics
-    ):
-        raise ScaffoldError("problem topics must be non-empty strings")
-    if not isinstance(details.examples, tuple) or any(
-        not isinstance(example, str) for example in details.examples
-    ):
-        raise ScaffoldError("problem examples must be strings")
-
-
-def render_problem_metadata(
-    problem_id: str,
-    title: str,
-    language: str,
-    problem_url: str | None,
-    signature: str | None,
-    details: ProblemDetails,
-) -> str:
-    """Render tracked, queryable static metadata as TOML."""
-    values: list[tuple[str, object]] = [
-        ("id", problem_id),
-        ("title", title),
-        ("language", language),
-        ("kind", details.kind),
-        ("target_minutes", details.target_minutes or default_target_minutes(details.difficulty)),
-    ]
-    if problem_url:
-        values.append(("url", problem_url))
-    if details.difficulty:
-        values.append(("difficulty", details.difficulty))
-    if signature:
-        values.append(("signature", signature))
-
-    lines = [
-        f"{key} = {value}"
-        if isinstance(value, int)
-        else f"{key} = {json.dumps(value, ensure_ascii=False)}"
-        for key, value in values
-    ]
-    lines.append(f"topics = {json.dumps(list(details.topics), ensure_ascii=False)}")
-    return "\n".join(lines) + "\n"
-
-
-def render_notes(title: str, examples: Sequence[str]) -> str:
-    """Render short retrieval-oriented prompts rather than a long solution write-up."""
-    example_section = (
-        "\n".join(f"- `{example}`" for example in examples) or "- Add supplied examples"
-    )
-    return f"""# {title}
-
-## Contract and examples
-
-{example_section}
-
-## Recognition cue
-
-## Brute force and bottleneck
-
-## Key invariant
-
-## Mistake or missed edge case
-
-## Complexity
-
-## Alternate approach
-
-## 60-second explanation
-"""
-
-
 def build_paths(root: Path, language: str, problem_id: str, slug: str) -> tuple[Path, Path, Path]:
     """Return the target directory, source path, and test path."""
     stem = problem_stem(problem_id, slug)
@@ -577,8 +366,6 @@ def create_problem(
     title_parts: Sequence[str],
     problem_url: str | None = None,
     signature: str | None = None,
-    *,
-    details: ProblemDetails | None = None,
 ) -> tuple[Path, Path, str]:
     """Create source and test templates, returning their paths and branch suggestion."""
     if language not in {"py", "ts"}:
@@ -591,11 +378,7 @@ def create_problem(
     function_name: str | None = None
     if signature is not None:
         signature, function_name = validate_signature(language, signature)
-    details = details or ProblemDetails()
-    validate_problem_details(details)
     directory, source_path, test_path = build_paths(root, language, problem_id, slug)
-    metadata_path = directory / "problem.toml"
-    notes_path = directory / "notes.md"
     language_directory = directory.parent
     existing_problems = matching_problem_directories(language_directory, problem_id)
     if existing_problems:
@@ -604,12 +387,7 @@ def create_problem(
         raise ScaffoldError(f"target already exists: {directory}")
 
     stem = problem_stem(problem_id, slug)
-    if details.starter_code:
-        source, export_name = render_starter_solution(
-            language, problem_id, title, details.starter_code, problem_url
-        )
-        test = render_starter_test(language, stem, export_name)
-    elif language == "py":
+    if language == "py":
         source = render_python_solution(problem_id, title, problem_url, signature)
         test = render_python_test(stem, function_name)
     else:
@@ -623,38 +401,26 @@ def create_problem(
     try:
         source_path.write_text(source, encoding="utf-8")
         test_path.write_text(test, encoding="utf-8")
-        metadata_path.write_text(
-            render_problem_metadata(problem_id, title, language, problem_url, signature, details),
-            encoding="utf-8",
-        )
-        notes_path.write_text(render_notes(title, details.examples), encoding="utf-8")
     except OSError:
-        for path in (source_path, test_path, metadata_path, notes_path):
+        for path in (source_path, test_path):
             path.unlink(missing_ok=True)
         directory.rmdir()
         raise
     return source_path, test_path, suggested_branch(problem_id, slug)
 
 
-def parse_request(arguments: Sequence[str]) -> ScaffoldRequest:
-    """Parse manual scaffold arguments, including study metadata."""
+def parse_arguments(arguments: Sequence[str]) -> tuple[str, str, list[str], str | None, str | None]:
+    """Parse CLI arguments while allowing optional metadata after the title."""
     if len(arguments) < 3:
         raise ScaffoldError(
             "usage: new_problem.py <py|ts> <problem-number> <title...> "
-            "[--url URL] [--signature SIGNATURE] [--difficulty LEVEL] "
-            "[--topic TOPIC] [--kind function|class|design] [--example CASE] "
-            "[--target-minutes MINUTES]"
+            "[--url URL] [--signature SIGNATURE]"
         )
 
     language, problem_number = arguments[:2]
     title_parts: list[str] = []
     problem_url: str | None = None
     signature: str | None = None
-    difficulty: str | None = None
-    topics: list[str] = []
-    kind = "function"
-    examples: list[str] = []
-    target_minutes: int | None = None
     position = 2
     while position < len(arguments):
         argument = arguments[position]
@@ -672,38 +438,6 @@ def parse_request(arguments: Sequence[str]) -> ScaffoldRequest:
                 raise ScaffoldError("--signature requires a signature")
             signature = arguments[position + 1]
             position += 2
-        elif argument == "--difficulty":
-            if difficulty is not None:
-                raise ScaffoldError("difficulty may only be provided once")
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--difficulty requires Easy, Medium, or Hard")
-            difficulty = arguments[position + 1]
-            position += 2
-        elif argument == "--topic":
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--topic requires a topic")
-            topics.append(arguments[position + 1])
-            position += 2
-        elif argument == "--kind":
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--kind requires function, class, or design")
-            kind = arguments[position + 1]
-            position += 2
-        elif argument == "--example":
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--example requires a case")
-            examples.append(arguments[position + 1])
-            position += 2
-        elif argument == "--target-minutes":
-            if target_minutes is not None:
-                raise ScaffoldError("target minutes may only be provided once")
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--target-minutes requires a positive integer")
-            try:
-                target_minutes = int(arguments[position + 1])
-            except ValueError as error:
-                raise ScaffoldError("--target-minutes requires a positive integer") from error
-            position += 2
         elif argument.startswith("--"):
             raise ScaffoldError(f"unknown option: {argument}")
         else:
@@ -712,51 +446,21 @@ def parse_request(arguments: Sequence[str]) -> ScaffoldRequest:
 
     if not title_parts:
         raise ScaffoldError("title is required")
-    return ScaffoldRequest(
-        language=language,
-        problem_number=problem_number,
-        title_parts=tuple(title_parts),
-        problem_url=problem_url,
-        signature=signature,
-        difficulty=difficulty,
-        topics=tuple(topics),
-        kind=kind,
-        examples=tuple(examples),
-        target_minutes=target_minutes,
-    )
-
-
-def parse_arguments(arguments: Sequence[str]) -> tuple[str, str, list[str], str | None, str | None]:
-    """Retain the original low-level parser result for existing callers."""
-    request = parse_request(arguments)
-    return (
-        request.language,
-        request.problem_number,
-        list(request.title_parts),
-        request.problem_url,
-        request.signature,
-    )
+    return language, problem_number, title_parts, problem_url, signature
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the command-line interface."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     try:
-        request = parse_request(arguments)
+        language, problem_number, title_parts, problem_url, signature = parse_arguments(arguments)
         source_path, test_path, branch = create_problem(
             Path(__file__).resolve().parents[1],
-            request.language,
-            request.problem_number,
-            request.title_parts,
-            request.problem_url,
-            request.signature,
-            details=ProblemDetails(
-                difficulty=request.difficulty,
-                topics=request.topics,
-                kind=request.kind,
-                examples=request.examples,
-                target_minutes=request.target_minutes,
-            ),
+            language,
+            problem_number,
+            title_parts,
+            problem_url,
+            signature,
         )
     except (ScaffoldError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
@@ -765,13 +469,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     print(f"Created: {source_path.relative_to(root)}")
     print(f"Created: {test_path.relative_to(root)}")
-    print(f"Created: {(source_path.parent / 'problem.toml').relative_to(root)}")
-    print(f"Created: {(source_path.parent / 'notes.md').relative_to(root)}")
     print(f"Suggested branch: {branch}")
     print("Next steps:")
-    normalized_id = normalize_problem_id(request.problem_number)
-    print(f"  lc test {request.language} {normalized_id}")
-    print(f"  lc watch {request.language} {normalized_id}")
+    normalized_id = normalize_problem_id(problem_number)
+    print(f"  lc test {language} {normalized_id}")
+    if language == "ts":
+        print(f"  lc watch {normalized_id}")
     print("  lc ready")
     return 0
 

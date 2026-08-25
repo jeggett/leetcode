@@ -61,8 +61,6 @@ def write_dependencies(
     site_packages = root / ".venv" / "lib" / "python3.14" / "site-packages"
     python_versions = {
         "pytest": python_version,
-        "pytest-timeout": "2.4.0",
-        "pytest-watcher": "0.6.3",
         "ruff": "0.16.2",
     }
     for dependency, version in python_versions.items():
@@ -76,8 +74,7 @@ def write_dependencies(
 
 def write_lefthook_installation(root: Path) -> None:
     (root / "lefthook.yml").write_text(
-        "pre-commit:\n  commands:\n    staged-ready:\n"
-        "      run: mise exec -- uv run python scripts/ready.py staged\n",
+        "pre-commit:\n  commands:\n    staged-ready:\n      run: mise exec -- pnpm ready\n",
         encoding="utf-8",
     )
     generated_hook = root / ".git" / "hooks" / "pre-commit"

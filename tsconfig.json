@@ -10,7 +10,7 @@
     "moduleResolution": "Bundler",
     "types": ["vitest/globals"]
   },
-  "include": ["src/typescript/**/*.ts", "vitest.config.ts", "vitest.retry.config.ts"],
+  "include": ["src/typescript/**/*.ts", "vitest.config.ts"],
   "$schema": "https://json.schemastore.org/tsconfig",
   "display": "Recommended"
 }

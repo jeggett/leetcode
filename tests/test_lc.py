@@ -239,92 +239,6 @@ def test_fetches_official_metadata_and_selected_language_signature(
     assert captured["timeout"] == 20
 
 
-def test_fetch_preserves_rich_metadata_and_design_starter() -> None:
-    document = graphql_document(
-        snippets=[
-            {
-                "langSlug": "typescript",
-                "code": "class LRUCache {\n  constructor(capacity: number) {}\n}",
-            }
-        ]
-    )
-    question = document["data"]["question"]  # type: ignore[index]
-    question.update(  # type: ignore[union-attr]
-        {
-            "difficulty": "Medium",
-            "topicTags": [
-                {"name": "Hash Table", "slug": "hash-table"},
-                {"name": "Design", "slug": "design"},
-            ],
-            "exampleTestcaseList": ['["LRUCache","put","get"]', "[[2],[1,1],[1]]"],
-        }
-    )
-
-    result = fetch_problem_metadata(
-        "ts", PROBLEM_URL, open_url=lambda *_args, **_kwargs: FakeResponse(document)
-    )
-
-    assert result.signature is None
-    assert result.kind == "design"
-    assert result.difficulty == "Medium"
-    assert result.topics == ("hash-table", "design")
-    assert result.starter_code == "class LRUCache {\n  constructor(capacity: number) {}\n}"
-    assert result.examples == ('["LRUCache","put","get"]', "[[2],[1,1],[1]]")
-
-
-def test_fetch_keeps_solution_with_judge_types_as_function_shaped() -> None:
-    document = graphql_document(
-        snippets=[
-            {
-                "langSlug": "python3",
-                "code": (
-                    "class Solution:\n"
-                    "    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:\n"
-                    "        pass\n"
-                ),
-            }
-        ]
-    )
-
-    result = fetch_problem_metadata(
-        "py", PROBLEM_URL, open_url=lambda *_args, **_kwargs: FakeResponse(document)
-    )
-
-    assert result.signature is None
-    assert result.kind == "function"
-    assert result.starter_code is not None
-
-
-def test_url_scaffold_keeps_official_design_shape_and_study_files(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path)
-    design = ProblemMetadata(
-        problem_id="0035",
-        title="Search Insert Position",
-        title_slug="search-insert-position",
-        canonical_url=PROBLEM_URL,
-        signature=None,
-        difficulty="Medium",
-        topics=("design",),
-        kind="design",
-        starter_code="class Searcher { constructor() {} }",
-        examples=("[]",),
-    )
-
-    result = scaffold_from_url(
-        tmp_path,
-        "ts",
-        PROBLEM_URL,
-        fetch=lambda _language, _url: design,
-        run=git,
-    )
-
-    assert "export class Searcher" in result.source_path.read_text(encoding="utf-8")
-    assert 'kind = "design"' in (result.source_path.parent / "problem.toml").read_text(
-        encoding="utf-8"
-    )
-    assert "`[]`" in (result.source_path.parent / "notes.md").read_text(encoding="utf-8")
-
-
 @pytest.mark.parametrize(
     ("document", "message"),
     [
@@ -563,7 +477,7 @@ def test_parses_concise_command_and_prints_success(
     monkeypatch.setattr(
         lc,
         "scaffold_from_url",
-        lambda *_arguments, **_options: ScaffoldResult(
+        lambda *_arguments: ScaffoldResult(
             metadata(), source, test, "feat/p-0035-search-insert-position"
         ),
     )
