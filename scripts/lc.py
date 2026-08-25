@@ -1250,13 +1250,16 @@ def start_problem(
     selected_language: str | None = None
     if _looks_like_url(value):
         canonical_url, _ = canonicalize_problem_url(value)
-        selected_language = requested_language or _configured_primary_language(root)
+        lookup_language = requested_language
+        if lookup_language is None and active_session is not None:
+            lookup_language = active_session.language
+        selected_language = lookup_language or _configured_primary_language(root)
 
         # A repeated URL start can run while the first invocation's scaffold is
         # still untracked.  Use the exact URL recorded by that scaffold and the
         # branch derived from its created directory, so a title/URL slug mismatch
         # cannot defeat the dirty-worktree repeat guard.
-        local_problem = _existing_problem_for_url(root, canonical_url, requested_language)
+        local_problem = _existing_problem_for_url(root, canonical_url, lookup_language)
         if local_problem is not None:
             selected_language, local_problem_id, directory = local_problem
             expected_branch = _branch_name_for_directory(local_problem_id, directory)
@@ -1275,7 +1278,12 @@ def start_problem(
         metadata = fetch(selected_language, canonical_url)
         problem_id = metadata.problem_id
         preferred_slug = slugify(metadata.title)
-        directory = build_paths(root, selected_language, problem_id, preferred_slug)[0]
+        existing = _existing_problem_directory(root, problem_id, selected_language)
+        directory = (
+            existing[1]
+            if existing is not None
+            else build_paths(root, selected_language, problem_id, preferred_slug)[0]
+        )
         current_branch = preflight_git(root, run)
         if current_branch != original_branch:
             raise LeetError("current branch changed while LeetCode metadata was loading")
@@ -1537,6 +1545,12 @@ def resume_problem(
         directory = context.directory
     else:
         normalized_id = _normalized_problem_id(problem_id)
+        if (
+            language is None
+            and active_session is not None
+            and active_session.problem_id == normalized_id
+        ):
+            language = active_session.language
         existing = _existing_problem_directory(root, normalized_id, language)
         if existing is None:
             target_branch = _branch_for_problem_id(root, normalized_id, run)

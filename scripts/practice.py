@@ -1845,7 +1845,8 @@ def _rewrite_typescript_retry_test(
 
     repository_root = problem.directory.parents[2]
     import_pattern = re.compile(
-        r"(?P<lead>\bfrom\s+|^[ \t]*import\s*)(?P<quote>[\"'])(?P<path>\.[^\"']+)(?P=quote)",
+        r"(?P<lead>^[ \t]*(?:(?:import|export)\s+[^;\n]*?\s+from\s+|import\s*))"
+        r"(?P<quote>[\"'])(?P<path>\.[^\"']+)(?P=quote)",
         re.MULTILINE,
     )
     source_path = problem.source_path.resolve()
@@ -1879,7 +1880,10 @@ def _typescript_imported_bindings(problem: Problem) -> tuple[tuple[str, str], ..
         return ()
     source_stem = problem.source_path.stem
     bindings: list[tuple[str, str]] = []
-    imports = re.compile(r"(?ms)^\s*import\s+(?P<spec>.+?)\s+from\s+[\"'](?P<path>[^\"']+)[\"']")
+    imports = re.compile(
+        r"(?m)^[ \t]*import[ \t]+(?P<spec>[^;\n]+?)[ \t]+from[ \t]+"
+        r"[\"'](?P<path>[^\"']+)[\"']"
+    )
     for imported in imports.finditer(test_source):
         module_stem = Path(imported["path"]).name
         for suffix in (".js", ".ts", ".mjs", ".mts"):
@@ -1968,6 +1972,7 @@ def _typescript_class_retry_source(
     for field_header in fields:
         rendered.append(f"    {field_header};")
     for method in methods:
+        method = re.sub(r"=\s*[A-Za-z_$][A-Za-z0-9_$]*(?=\s*[,\)])", "= undefined", method)
         rendered.append(f"    {method} {{")
         if method.startswith("constructor"):
             rendered.append("        // TODO: initialize the class state")
@@ -2237,22 +2242,25 @@ def _python_class_retry_source(
         if method.name == "__init__":
             assignments = []
             for statement in method.body:
-                if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                    target = statement.targets[0]
+                    value = statement.value
+                elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                    target = statement.target
+                    value = statement.value
+                else:
                     continue
-                target = statement.targets[0]
                 if (
                     isinstance(target, ast.Attribute)
                     and isinstance(target.value, ast.Name)
                     and target.value.id == "self"
                     and (
-                        isinstance(statement.value, ast.Name)
-                        and statement.value.id in {argument.arg for argument in method.args.args}
-                        or _python_self_contained_default(statement.value)
+                        isinstance(value, ast.Name)
+                        and value.id in {argument.arg for argument in method.args.args}
+                        or _python_self_contained_default(value)
                     )
                 ):
-                    assignments.append(
-                        f"        self.{target.attr} = {ast.unparse(statement.value)}"
-                    )
+                    assignments.append(f"        self.{target.attr} = {ast.unparse(value)}")
             rendered.extend(assignments or ["        pass"])
         else:
             rendered.append('        raise NotImplementedError("TODO: implement retry")')
@@ -2386,6 +2394,12 @@ def _python_retry_source(problem: Problem) -> str:
     imported_classes = (
         [available_classes[name] for name in imported_class_names] if available_classes else []
     )
+    inherited_classes = [class_node.name for class_node in imported_classes if class_node.bases]
+    if inherited_classes:
+        raise PracticeError(
+            "retry cannot safely recreate inherited Python class interface(s) "
+            + ", ".join(inherited_classes)
+        )
     if source is not None and imported_classes:
         needs_dataclass_import = any(
             _python_dataclass_decorator(class_node) is not None for class_node in imported_classes
@@ -2470,6 +2484,15 @@ def _validate_python_retry_test_dependencies(
         raise PracticeError(f"retry cannot parse {original_test}: {error}") from error
     dependencies: set[Path] = set()
     for node in ast.walk(module):
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module
+            and "." in node.module
+            and node.module.rsplit(".", 1)[-1] == problem.source_path.stem
+        ):
+            raise PracticeError(
+                f"retry cannot safely copy {original_test.name}: package-qualified solution imports are unsupported"
+            )
         candidates: list[tuple[Path, str]] = []
         if isinstance(node, ast.Import):
             candidates.extend((original_test.parent, alias.name) for alias in node.names)
