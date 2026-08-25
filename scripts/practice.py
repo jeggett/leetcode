@@ -1424,6 +1424,9 @@ def _typescript_matching_delimiter(
             end = source.find("*/", index + 2)
             index = len(source) if end == -1 else end + 2
             continue
+        if character == "/" and _typescript_regex_literal_starts(source, index):
+            index = _typescript_regex_literal_end(source, index)
+            continue
         if character in {"'", '"', "`"}:
             quote = character
         elif character == opener:
@@ -1434,6 +1437,44 @@ def _typescript_matching_delimiter(
                 return index
         index += 1
     return None
+
+
+def _typescript_regex_literal_starts(source: str, index: int) -> bool:
+    """Recognize regex literals in expression-leading TypeScript positions."""
+
+    prefix = source[:index].rstrip()
+    if not prefix:
+        return True
+    if prefix[-1] in "([=,:!&|?{;":
+        return True
+    return bool(re.search(r"(?:\breturn|\bthrow|\bcase|=>)\s*$", prefix))
+
+
+def _typescript_regex_literal_end(source: str, opening: int) -> int:
+    """Return the first position after a slash-delimited regex and its flags."""
+
+    index = opening + 1
+    escaped = False
+    in_character_class = False
+    while index < len(source):
+        character = source[index]
+        if escaped:
+            escaped = False
+        elif character == "\\":
+            escaped = True
+        elif character == "[":
+            in_character_class = True
+        elif character == "]":
+            in_character_class = False
+        elif character == "/" and not in_character_class:
+            index += 1
+            while index < len(source) and source[index].isalpha():
+                index += 1
+            return index
+        elif character == "\n":
+            return opening + 1
+        index += 1
+    return opening + 1
 
 
 def _typescript_matching_brace(source: str, opening: int) -> int | None:
@@ -1853,7 +1894,8 @@ def _rewrite_typescript_retry_test(
 
     repository_root = problem.directory.parents[2]
     import_pattern = re.compile(
-        r"(?P<lead>^[ \t]*(?:(?:import|export)\s+(?:(?!;).)*?\s+from\s+|import\s*))"
+        r"(?P<lead>(?:^[ \t]*(?:(?:import|export)\s+(?:(?!;).)*?\s+from\s+|import\s*)"
+        r"|\bimport\s*\(\s*))"
         r"(?P<quote>[\"'])(?P<path>\.[^\"']+)(?P=quote)",
         re.MULTILINE | re.DOTALL,
     )
@@ -2519,6 +2561,21 @@ def _python_retry_source(problem: Problem) -> str:
         raise PracticeError(
             "retry cannot safely recreate inherited Python class interface(s) "
             + ", ".join(inherited_classes)
+        )
+    post_init_classes = [
+        class_node.name
+        for class_node in imported_classes
+        if _python_dataclass_decorator(class_node) is not None
+        and any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == "__post_init__"
+            for node in class_node.body
+        )
+    ]
+    if post_init_classes:
+        raise PracticeError(
+            "retry cannot safely recreate dataclass post-init state for "
+            + ", ".join(post_init_classes)
         )
     if source is not None and imported_classes:
         needs_dataclass_import = any(

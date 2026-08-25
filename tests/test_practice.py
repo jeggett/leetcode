@@ -948,6 +948,49 @@ def test_retry_rewrites_shared_typescript_imports_for_isolated_tests(
     assert "return value + 99" not in attempt.path.read_text(encoding="utf-8")
 
 
+def test_retry_rewrites_dynamic_typescript_test_helpers(tmp_path: Path) -> None:
+    helper = tmp_path / "src/typescript/helpers/value.ts"
+    helper.parent.mkdir(parents=True)
+    helper.write_text("export const value = 1;\n", encoding="utf-8")
+    directory = make_problem(tmp_path, "ts", "0011", "dynamic_import")
+    (directory / "p_0011_dynamic_import.test.ts").write_text(
+        'import { solve } from "./p_0011_dynamic_import.js";\n'
+        'test("dynamic", async () => {\n'
+        '    const helper = await import("../helpers/value.js");\n'
+        "    expect(solve(helper.value)).toBe(1);\n"
+        "});\n",
+        encoding="utf-8",
+    )
+
+    copied_test = retry(tmp_path, "0011").test_path.read_text(encoding="utf-8")
+
+    assert "../../../src/typescript/helpers/value.js" in copied_test
+
+
+def test_retry_skips_regex_literals_while_balancing_class_methods(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0012",
+        "regex_class",
+        source=(
+            "export class Cleaner {\n"
+            '    clean(value: string): string { return value.replace(/}/g, ""); }\n'
+            "    size(value: string): number { return value.length; }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0012_regex_class.test.ts").write_text(
+        'import { Cleaner } from "./p_0012_regex_class.js";\n', encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0012").path.read_text(encoding="utf-8")
+
+    assert "clean(value: string): string" in source
+    assert "size(value: string): number" in source
+
+
 def test_retry_preserves_every_imported_typescript_solution_export(tmp_path: Path) -> None:
     directory = make_problem(
         tmp_path,
@@ -1165,6 +1208,29 @@ def test_retry_preserves_public_typescript_class_fields(tmp_path: Path) -> None:
     assert "public left!: TreeNode | null;" in source
     assert "secret" not in source
     assert "this.val = val" not in source
+
+
+def test_retry_rejects_imported_dataclass_post_init_state(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0006",
+        "post_init",
+        source=(
+            "from dataclasses import dataclass\n\n"
+            "@dataclass\n"
+            "class Node:\n"
+            "    value: int\n"
+            "    def __post_init__(self):\n"
+            "        self.doubled = self.value * 2\n"
+        ),
+    )
+    (directory / "test_p_0006_post_init.py").write_text(
+        "from p_0006_post_init import Node\n", encoding="utf-8"
+    )
+
+    with pytest.raises(PracticeError, match="post-init state"):
+        retry(tmp_path, "0006", "py")
 
 
 def test_retry_rejects_initialized_typescript_helper_fields(tmp_path: Path) -> None:
