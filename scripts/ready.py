@@ -397,7 +397,7 @@ def run_changed_gate(
         run_full_gate(root, run=run)
         return
     if not keys:
-        print("Ready scope: no changed solution code")
+        run_full_gate(root, run=run)
         return
     for language, problem_id in keys:
         try:

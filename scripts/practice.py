@@ -2506,14 +2506,22 @@ def _validate_python_retry_test_dependencies(
         raise PracticeError(f"retry cannot parse {original_test}: {error}") from error
     dependencies: set[Path] = set()
     for node in ast.walk(module):
+        if isinstance(node, ast.Import):
+            if any(
+                "." in alias.name and alias.name.rsplit(".", 1)[-1] == problem.source_path.stem
+                for alias in node.names
+            ):
+                raise PracticeError(
+                    f"retry cannot safely copy {original_test.name}: package-qualified solution imports are unsupported"
+                )
         if (
             isinstance(node, ast.ImportFrom)
             and node.module
-            and "." in node.module
             and node.module.rsplit(".", 1)[-1] == problem.source_path.stem
+            and ("." in node.module or any(alias.name == "*" for alias in node.names))
         ):
             raise PracticeError(
-                f"retry cannot safely copy {original_test.name}: package-qualified solution imports are unsupported"
+                f"retry cannot safely copy {original_test.name}: package-qualified and wildcard solution imports are unsupported"
             )
         candidates: list[tuple[Path, str]] = []
         if isinstance(node, ast.Import):
