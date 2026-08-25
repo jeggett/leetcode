@@ -24,12 +24,13 @@ class LcConfig:
 def load_config(root: Path) -> LcConfig:
     """Load ``lc.toml`` or return comfortable defaults when it is absent."""
     path = root / "lc.toml"
-    if not path.is_file():
-        return LcConfig()
-    try:
-        document = tomllib.loads(path.read_text(encoding="utf-8"))
-    except (OSError, tomllib.TOMLDecodeError) as error:
-        raise ConfigError(f"could not read {path}: {error}") from error
+    if path.is_file():
+        try:
+            document = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, tomllib.TOMLDecodeError) as error:
+            raise ConfigError(f"could not read {path}: {error}") from error
+    else:
+        document = {}
 
     repository = document.get("repository", {})
     practice = document.get("practice", {})
@@ -58,6 +59,10 @@ def load_config(root: Path) -> LcConfig:
         or Path(history_directory).parts[0] != ".lc"
     ):
         raise ConfigError("practice.history_directory must stay under the ignored .lc directory")
+    if (root / ".lc").is_symlink():
+        raise ConfigError(
+            "practice.history_directory must use a physical .lc directory, not a symlink"
+        )
     try:
         (root / history_directory).resolve().relative_to(root.resolve())
     except (OSError, ValueError) as error:

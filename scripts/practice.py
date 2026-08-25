@@ -2695,6 +2695,18 @@ def _python_retry_source(problem: Problem) -> str:
             "retry cannot safely stub behavioral Python helper class(es) "
             + ", ".join(behavioral_helpers)
         )
+    stateful_helpers = [
+        class_node.name
+        for class_node in imported_classes
+        if class_node is not retry_target
+        and _python_dataclass_decorator(class_node) is None
+        and any(isinstance(node, (ast.Assign, ast.AnnAssign)) for node in class_node.body)
+    ]
+    if stateful_helpers:
+        raise PracticeError(
+            "retry cannot safely stub stateful Python helper class(es) "
+            + ", ".join(stateful_helpers)
+        )
     inherited_classes = [class_node.name for class_node in imported_classes if class_node.bases]
     if inherited_classes:
         raise PracticeError(

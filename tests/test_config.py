@@ -49,3 +49,12 @@ def test_config_rejects_history_symlink_that_escapes_repository(tmp_path: Path) 
 
     with pytest.raises(ConfigError, match="symlink"):
         load_config(tmp_path)
+
+
+def test_config_rejects_history_symlink_inside_repository(tmp_path: Path) -> None:
+    target = tmp_path / "src/practice-state"
+    target.mkdir(parents=True)
+    (tmp_path / ".lc").symlink_to(target, target_is_directory=True)
+
+    with pytest.raises(ConfigError, match="physical .lc"):
+        load_config(tmp_path)

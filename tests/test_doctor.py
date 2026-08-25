@@ -95,6 +95,9 @@ def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResu
         ("python", "--version"): "Python 3.14.7\n",
         ("uv", "--version"): "uv 0.12.2\n",
         ("git", "config", "--get", "core.hooksPath"): "",
+        ("git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit"): str(
+            _ / ".git/hooks/pre-commit"
+        ),
     }
     return CommandResult(0, outputs[tuple(command)])
 
@@ -231,6 +234,31 @@ def test_collect_checks_requires_generated_lefthook_hook(tmp_path: Path) -> None
     result = next(check for check in checks if check.name == "Lefthook generated pre-commit hook")
     assert not result.passed
     assert "pnpm prepare" in result.detail
+
+
+def test_collect_checks_resolves_worktree_hook_through_git(tmp_path: Path) -> None:
+    write_metadata(tmp_path)
+    write_dependencies(tmp_path)
+    write_lefthook_installation(tmp_path)
+    shared_hook = tmp_path / "shared-hooks/pre-commit"
+    shared_hook.parent.mkdir()
+    shared_hook.write_text('#!/bin/sh\nlefthook run pre-commit -- "$@"\n', encoding="utf-8")
+    shared_hook.chmod(0o755)
+
+    def worktree_runner(command: tuple[str, ...] | list[str], root: Path) -> CommandResult:
+        if tuple(command) == (
+            "git",
+            "rev-parse",
+            "--path-format=absolute",
+            "--git-path",
+            "hooks/pre-commit",
+        ):
+            return CommandResult(0, f"{shared_hook}\n")
+        return command_runner(command, root)
+
+    checks = collect_checks(tmp_path, find_command=lambda _: "/usr/bin/tool", run=worktree_runner)
+    result = next(check for check in checks if check.name == "Lefthook generated pre-commit hook")
+    assert result.passed
 
 
 def test_main_returns_nonzero_when_setup_is_incomplete(

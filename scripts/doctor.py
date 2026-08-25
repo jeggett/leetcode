@@ -39,7 +39,6 @@ NODE_DEPENDENCY = "vitest"
 PYTHON_DEPENDENCY = "pytest"
 
 LEFTHOOK_CONFIG = Path("lefthook.yml")
-LEFTHOOK_GENERATED_HOOK = Path(".git/hooks/pre-commit")
 LEFTHOOK_COMMAND = "mise exec -- uv run python scripts/ready.py staged"
 HUSKY_HOOK_LAUNCHER_PATTERN = re.compile(
     r"""(?mx)
@@ -416,9 +415,16 @@ def lefthook_config_check(root: Path) -> Check:
     return Check("Lefthook pre-commit config", True, f"runs {LEFTHOOK_COMMAND}")
 
 
-def lefthook_generated_hook_check(root: Path) -> Check:
+def lefthook_generated_hook_check(root: Path, run: CommandRunner) -> Check:
     """Verify Lefthook installed an executable Git pre-commit hook."""
-    hook_path = root / LEFTHOOK_GENERATED_HOOK
+    result = _run(
+        run,
+        ("git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit"),
+        root,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return Check("Lefthook generated pre-commit hook", False, "cannot resolve Git hook path")
+    hook_path = Path(result.stdout.strip())
     contents = read_text_file(hook_path)
     if contents is None:
         return Check("Lefthook generated pre-commit hook", False, "missing; run pnpm prepare")
@@ -433,7 +439,7 @@ def lefthook_generated_hook_check(root: Path) -> Check:
 
 def lefthook_checks(root: Path, available: set[str], run: CommandRunner) -> list[Check]:
     """Verify tracked and installed Lefthook configuration."""
-    return [lefthook_config_check(root), lefthook_generated_hook_check(root)]
+    return [lefthook_config_check(root), lefthook_generated_hook_check(root, run)]
 
 
 def clipboard_check(

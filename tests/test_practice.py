@@ -1527,6 +1527,24 @@ def test_retry_rejects_behavioral_python_helpers(tmp_path: Path) -> None:
         retry(tmp_path, "0913", "py")
 
 
+def test_retry_rejects_stateful_python_helpers(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0915",
+        "stateful_helper",
+        source=(
+            "class Node:\n    DEFAULT = 7\n\n"
+            "class Solution:\n    def solve(self) -> int:\n        return 1\n"
+        ),
+    )
+    (directory / "test_p_0915_stateful_helper.py").write_text(
+        "from p_0915_stateful_helper import Node, Solution\n", encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="stateful Python helper"):
+        retry(tmp_path, "0915", "py")
+
+
 def test_retry_rejects_relative_python_helpers_outside_problem(tmp_path: Path) -> None:
     package = tmp_path / "src" / "python"
     package.mkdir(parents=True, exist_ok=True)

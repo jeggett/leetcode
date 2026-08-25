@@ -74,6 +74,7 @@ DEPENDENCY_MANIFESTS = frozenset(
         "mise.toml",
         "package.json",
         "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
         "pyproject.toml",
         "uv.lock",
     }
@@ -365,6 +366,7 @@ def changed_problem_keys(paths: Sequence[str]) -> tuple[list[tuple[str, str]], b
     code_files = {
         "package.json",
         "pnpm-lock.yaml",
+        "pnpm-workspace.yaml",
         "pyproject.toml",
         "uv.lock",
         "lefthook.yml",

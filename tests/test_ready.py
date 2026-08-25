@@ -108,6 +108,9 @@ def test_changed_paths_select_problems_and_escalate_tooling() -> None:
     _, full = changed_problem_keys(["scripts/lc.py"])
     assert full is True
 
+    _, full = changed_problem_keys(["pnpm-workspace.yaml"])
+    assert full is True
+
 
 def test_changed_paths_combines_committed_and_worktree_changes(tmp_path: Path) -> None:
     def git_run(command: tuple[str, ...], _cwd: Path) -> CommandResult:
