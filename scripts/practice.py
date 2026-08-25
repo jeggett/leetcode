@@ -1650,6 +1650,16 @@ def _typescript_type_declarations(source: str) -> dict[str, str]:
     return declarations
 
 
+def _typescript_enum_is_self_contained(declaration: str) -> bool:
+    """Return whether enum initializers avoid omitted runtime names."""
+
+    for initializer in re.findall(r"=\s*([^,}\n]+)", declaration):
+        without_literals = re.sub(r"(?:\"(?:\\.|[^\"])*\"|'(?:\\.|[^'])*')", "", initializer)
+        if re.search(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", without_literals):
+            return False
+    return True
+
+
 def _typescript_referenced_type_declarations(source: str, rendered: str) -> list[str]:
     """Return transitive file-local type and class declarations used by a retry interface."""
 
@@ -1668,6 +1678,12 @@ def _typescript_referenced_type_declarations(source: str, rendered: str) -> list
         for name, declaration in declarations.items():
             if name not in identifiers or name in declared_types or name in selected:
                 continue
+            if re.match(
+                r"(?:export\s+)?enum\b", declaration
+            ) and not _typescript_enum_is_self_contained(declaration):
+                raise PracticeError(
+                    f"retry cannot safely recreate enum {name} with runtime dependencies"
+                )
             selected.add(name)
             identifiers.update(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", declaration))
             changed = True
@@ -1901,7 +1917,26 @@ def _rewrite_typescript_retry_test(
     )
     source_path = problem.source_path.resolve()
 
+    def position_is_code(position: int) -> bool:
+        index = 0
+        while index < position:
+            if test_source.startswith("//", index):
+                newline = test_source.find("\n", index + 2)
+                index = len(test_source) if newline == -1 else newline + 1
+                continue
+            if test_source.startswith("/*", index):
+                closing = test_source.find("*/", index + 2)
+                index = len(test_source) if closing == -1 else closing + 2
+                continue
+            if test_source[index] in {"'", '"', "`"}:
+                index = _typescript_quoted_end(test_source, index)
+                continue
+            index += 1
+        return index == position
+
     def replace(match: re.Match[str]) -> str:
+        if "(" in match["lead"] and not position_is_code(match.start("lead")):
+            return match.group(0)
         import_name = match["path"]
         target = _resolve_typescript_import(original_test.parent, import_name, repository_root)
         if target is None:
@@ -2045,7 +2080,8 @@ def _typescript_sanitize_retry_defaults(signature: str) -> str:
     """Replace defaults that can depend on declarations omitted from a retry."""
 
     safe_default = re.compile(
-        r"\s*(?:[-+]?\d+(?:\.\d+)?\b|true\b|false\b|null\b|undefined\b|[\"'`])"
+        r"\s*(?:[-+]?\d+(?:\.\d+)?|true|false|null|undefined|"
+        r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|(?!\$\{)[^`\\])*`)\s*'
     )
     replacements: list[tuple[int, int]] = []
     index = 0
@@ -2076,7 +2112,7 @@ def _typescript_sanitize_retry_defaults(signature: str) -> str:
             elif not stack and character in {",", ")"}:
                 break
             cursor += 1
-        if not safe_default.match(signature[start:cursor]):
+        if not safe_default.fullmatch(signature[start:cursor]):
             replacements.append((index, cursor))
         index = max(cursor, index + 1)
     for start, end in reversed(replacements):
@@ -2106,9 +2142,15 @@ def _typescript_class_has_initialized_field(source: str, class_match: re.Match[s
             index = member_closing
         elif character in {";", "\n"}:
             candidate = source[member_start:index]
-            if _typescript_class_field_header(candidate) is not None and re.search(
-                r"(?<![=!<>])=(?!=|>)", candidate
-            ):
+            normalized = " ".join(candidate.split())
+            inferred_field = re.fullmatch(
+                r"(?:(?:public|private|protected|static|readonly|declare)\s+)*"
+                r"[A-Za-z_$][A-Za-z0-9_$]*[!?]?\s*=.+",
+                normalized,
+            )
+            if (
+                _typescript_class_field_header(candidate) is not None or inferred_field
+            ) and re.search(r"(?<![=!<>])=(?!=|>)", candidate):
                 return True
             if character == ";" or not candidate.strip():
                 member_start = index + 1
@@ -2262,7 +2304,19 @@ def _python_dataclass_default_is_safe(value: ast.expr) -> bool:
     )
     if not is_field or any(not _python_self_contained_default(item) for item in value.args):
         return False
-    builtin_factories = {"dict", "frozenset", "list", "set", "tuple"}
+    builtin_factories = {
+        "bool",
+        "bytes",
+        "complex",
+        "dict",
+        "float",
+        "frozenset",
+        "int",
+        "list",
+        "set",
+        "str",
+        "tuple",
+    }
     return all(
         keyword.arg == "default_factory"
         and isinstance(keyword.value, ast.Name)
@@ -2673,7 +2727,7 @@ def _validate_python_retry_test_dependencies(
             isinstance(node, ast.ImportFrom)
             and node.module
             and node.module.rsplit(".", 1)[-1] == problem.source_path.stem
-            and ("." in node.module or any(alias.name == "*" for alias in node.names))
+            and (node.level or "." in node.module or any(alias.name == "*" for alias in node.names))
         ):
             raise PracticeError(
                 f"retry cannot safely copy {original_test.name}: package-qualified and wildcard solution imports are unsupported"

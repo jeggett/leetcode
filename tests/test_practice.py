@@ -1364,3 +1364,79 @@ def test_cli_reports_expected_errors_without_traceback(
     error = capsys.readouterr().err
     assert "no active" in error
     assert "Traceback" not in error
+
+
+def test_retry_sanitizes_literal_prefixed_typescript_defaults(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0901",
+        "defaults",
+        source="const LIMIT = 2;\nexport function solve(limit = 1 + LIMIT): number { return limit; }\n",
+    )
+    (directory / "p_0901_defaults.test.ts").write_text(
+        'import { solve } from "./p_0901_defaults.js";\n', encoding="utf-8"
+    )
+    assert "limit = undefined" in retry(tmp_path, "0901").path.read_text(encoding="utf-8")
+
+
+def test_retry_rejects_inferred_initialized_typescript_helper(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0902",
+        "helper",
+        source="export class Node { val = 1; }\nexport function solve(): number { return 1; }\n",
+    )
+    (directory / "p_0902_helper.test.ts").write_text(
+        'import { Node, solve } from "./p_0902_helper.js";\n', encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="constructor state"):
+        retry(tmp_path, "0902")
+
+
+def test_retry_ignores_dynamic_import_text_in_comments(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts", "0903", "comment_import")
+    (directory / "p_0903_comment_import.test.ts").write_text(
+        '// import("./missing.js")\nimport { solve } from "./p_0903_comment_import.js";\n',
+        encoding="utf-8",
+    )
+    assert 'import("./missing.js")' in retry(tmp_path, "0903").test_path.read_text(encoding="utf-8")
+
+
+def test_retry_rejects_relative_python_solution_import(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "py", "0904", "relative")
+    (directory / "test_p_0904_relative.py").write_text(
+        "from .p_0904_relative import Solution\n", encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="package-qualified"):
+        retry(tmp_path, "0904", "py")
+
+
+def test_retry_preserves_scalar_dataclass_factories(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0905",
+        "factory",
+        source="from dataclasses import dataclass, field\n@dataclass\nclass Item:\n    count: int = field(default_factory=int)\n",
+    )
+    (directory / "test_p_0905_factory.py").write_text(
+        "from p_0905_factory import Item\n", encoding="utf-8"
+    )
+    assert "default_factory=int" in retry(tmp_path, "0905", "py").path.read_text(encoding="utf-8")
+
+
+def test_retry_rejects_enum_runtime_dependencies(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0906",
+        "enum_dependency",
+        source="const OFFSET = 1;\nenum Mode { A = OFFSET }\nexport function solve(mode: Mode): Mode { return mode; }\n",
+    )
+    (directory / "p_0906_enum_dependency.test.ts").write_text(
+        'import { solve } from "./p_0906_enum_dependency.js";\n', encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="enum Mode"):
+        retry(tmp_path, "0906")
