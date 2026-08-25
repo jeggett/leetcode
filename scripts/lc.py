@@ -120,7 +120,6 @@ Practice:
   lc begin [ts|py] [ID]          start a timed new/review/mock session
   lc finish --result RESULT      record solved, hinted, or failed
   lc review [ts|py] [ID]         show due reviews or start one
-  lc retry [ts|py] ID            make an isolated blank retry
   lc list [ts|py] [FILTERS]      show per-problem practice state
   lc stats [ts|py]               report progress and weak patterns
 
@@ -180,10 +179,6 @@ COMMAND_HELP = {
     "review": (
         "usage: lc review [ts|py] [ID] [--limit N]\n\n"
         "Show due reviews, or start the selected problem in review mode."
-    ),
-    "retry": (
-        "usage: lc retry [ts|py] ID\n\n"
-        "Create an isolated blank attempt under .lc with a focused test command."
     ),
     "list": (
         "usage: lc list [ts|py] [--due|--unseen|--filter STATE]\n\n"
@@ -1721,7 +1716,7 @@ def _ready_command(
     raise LcUsageError("ready scope must be --current, --changed, or all")
 
 
-PRACTICE_COMMANDS = frozenset({"today", "begin", "finish", "review", "retry", "list", "stats"})
+PRACTICE_COMMANDS = frozenset({"today", "begin", "finish", "review", "list", "stats"})
 
 
 def _practice_command(command: str, arguments: Sequence[str], root: Path) -> tuple[str, ...]:

@@ -129,15 +129,12 @@ accepted solutions or branches.
 | `lc begin [ts\|py] [ID] [--mode new\|review\|mock]` | Start a timed session |
 | `lc finish --result solved\|hinted\|failed [--confidence 1-4]` | Finish and schedule review |
 | `lc review [ts\|py] [ID]` | Show due work or start a review session |
-| `lc retry [ts\|py] ID` | Create a blank isolated retry artifact |
 | `lc list [ts\|py] --due\|--unseen` | Show practice status |
 | `lc stats [ts\|py]` | Show attempts, completion, timing, and weak patterns |
 
 `lc finish` also accepts `--elapsed SECONDS` to override the measured timer and `--notes TEXT`.
 A solved session's review interval grows with confidence; hinted and failed sessions return
-sooner. Retry files live under `.lc/practice-attempts` and never contain the accepted solution
-body. The retry builder preserves the callable interfaces required by the copied test and stops
-with guidance when an imported shape cannot be recreated safely.
+sooner. Use `lc new` when you need another conventional source-and-test scaffold.
 
 ### Quality and diagnostics
 

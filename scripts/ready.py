@@ -375,7 +375,6 @@ def changed_problem_keys(paths: Sequence[str]) -> tuple[list[tuple[str, str]], b
         ".python-version",
         "tsconfig.json",
         "vitest.config.ts",
-        "vitest.retry.config.ts",
         "biome.json",
         "mise.toml",
     }

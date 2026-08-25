@@ -243,5 +243,5 @@ jspm_packages/
 
 .idea/
 
-# Local interview-practice sessions, retry workspaces, and history
+# Local interview-practice sessions and history
 .lc/
