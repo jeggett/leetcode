@@ -902,9 +902,15 @@ def _record_from_dict(payload: Mapping[str, Any], source: Path) -> PracticeRecor
         language = normalize_language(str(payload["language"]))
         mode = _validate_mode(str(payload["mode"]))
         result = _validate_result(str(payload["result"]))
-        confidence = _validate_confidence(int(payload["confidence"]))
-        elapsed = float(payload["elapsed_seconds"])
-        if elapsed < 0:
+        raw_confidence = payload["confidence"]
+        if isinstance(raw_confidence, bool) or not isinstance(raw_confidence, int):
+            raise ValueError("confidence must be an integer")
+        confidence = _validate_confidence(raw_confidence)
+        raw_elapsed = payload["elapsed_seconds"]
+        if isinstance(raw_elapsed, bool) or not isinstance(raw_elapsed, (int, float)):
+            raise ValueError("elapsed_seconds must be a number")
+        elapsed = float(raw_elapsed)
+        if elapsed < 0 or not math.isfinite(elapsed):
             raise ValueError("elapsed_seconds cannot be negative")
         started_at = _parse_datetime(payload["started_at"], "started_at")
         finished_at = _parse_datetime(payload["finished_at"], "finished_at")
@@ -2035,13 +2041,17 @@ def _typescript_retry_exports(
     if "*" in requested_names:
         requested_names = [*functions, *classes, *declarations]
     requested_classes = [name for name in requested_names if name in classes]
-    if len(requested_classes) > 1 and re.search(
-        r"constructor\s*\([^)]*\)\s*\{[^}]*\bthis\.[A-Za-z_$][A-Za-z0-9_$]*\s*=",
-        source,
-        re.DOTALL,
+    if (
+        requested_classes
+        and len(requested_names) > 1
+        and re.search(
+            r"constructor\s*\([^)]*\)\s*\{[^}]*\bthis\.[A-Za-z_$][A-Za-z0-9_$]*\s*=",
+            source,
+            re.DOTALL,
+        )
     ):
         raise PracticeError(
-            "retry cannot safely recreate multiple imported TypeScript classes with constructor state"
+            "retry cannot safely recreate imported TypeScript helper classes with constructor state"
         )
 
     rendered: list[str] = []

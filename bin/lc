@@ -32,6 +32,9 @@ exec_direct_python() {
 }
 
 for argument in "$@"; do
+    if [ "$argument" = "--" ]; then
+        break
+    fi
     case "$argument" in
         -h|--help)
             exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
