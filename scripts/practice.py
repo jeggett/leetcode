@@ -98,7 +98,7 @@ TS_CLASS_PATTERN = re.compile(
 )
 TS_CLASS_MEMBER_PATTERN = re.compile(
     r"^(?:(?:(?:public|private|protected|static|readonly|abstract|override|async|get|set)\s+)*"
-    r")(?:constructor|#?[A-Za-z_$][A-Za-z0-9_$]*)"
+    r")(?:constructor|\*?\s*#?[A-Za-z_$][A-Za-z0-9_$]*)"
     r"(?:\s*<.*?>)?\s*"
     r"\((?:[^(){}]|\{[^{}]*\}|\([^()]*\))*\)\s*(?::\s*.+)?$",
     re.DOTALL,
@@ -1643,7 +1643,7 @@ def _typescript_class_member_candidate(header: str) -> str | None:
     # Decorators and comments are not part of a retry interface.  Removing them also prevents
     # accepted implementation details from being copied into the scratch artifact.
     header = re.sub(r"(?m)^[ \t]*@[^\n]*\n?", "", header)
-    header = re.sub(r"(?m)^[ \t]*(?://|/\*|\*|\*/)[^\n]*\n?", "", header)
+    header = re.sub(r"(?m)^[ \t]*(?://|/\*|\*[ \t]|\*/)[^\n]*\n?", "", header)
     header = " ".join(header.split())
     if not TS_CLASS_MEMBER_PATTERN.fullmatch(header):
         return None
@@ -2153,11 +2153,13 @@ def _python_dataclass_decorator(class_node: ast.ClassDef) -> str | None:
             continue
         if not isinstance(decorator, ast.Call):
             return "dataclass"
+        if any(not _python_self_contained_default(argument) for argument in decorator.args):
+            return "dataclass"
         arguments = [ast.unparse(argument) for argument in decorator.args]
         arguments.extend(
             f"{keyword.arg}={ast.unparse(keyword.value)}"
             for keyword in decorator.keywords
-            if keyword.arg is not None
+            if keyword.arg is not None and _python_self_contained_default(keyword.value)
         )
         return f"dataclass({', '.join(arguments)})"
     return None
@@ -2233,7 +2235,25 @@ def _python_class_retry_source(
                 rendered.append(f"    @{decorator_text}")
         rendered.append(f"    {_python_method_signature(method)}:")
         if method.name == "__init__":
-            rendered.append("        pass")
+            assignments = []
+            for statement in method.body:
+                if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+                    continue
+                target = statement.targets[0]
+                if (
+                    isinstance(target, ast.Attribute)
+                    and isinstance(target.value, ast.Name)
+                    and target.value.id == "self"
+                    and (
+                        isinstance(statement.value, ast.Name)
+                        and statement.value.id in {argument.arg for argument in method.args.args}
+                        or _python_self_contained_default(statement.value)
+                    )
+                ):
+                    assignments.append(
+                        f"        self.{target.attr} = {ast.unparse(statement.value)}"
+                    )
+            rendered.extend(assignments or ["        pass"])
         else:
             rendered.append('        raise NotImplementedError("TODO: implement retry")')
     return "\n".join(rendered) + "\n"

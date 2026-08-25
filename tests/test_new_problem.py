@@ -203,6 +203,26 @@ def test_scaffolds_typescript_generator_starter_function(tmp_path: Path) -> None
     )
 
 
+def test_starter_fallback_prefers_function_after_helper_class(tmp_path: Path) -> None:
+    source, test, _ = create_problem(
+        tmp_path,
+        "ts",
+        "2",
+        ["Add Two Numbers"],
+        details=ProblemDetails(
+            starter_code=(
+                "class ListNode { constructor(public val: number) {} }\n"
+                "function addTwoNumbers(left: ListNode): ListNode { return left; }\n"
+            )
+        ),
+    )
+
+    assert "export function addTwoNumbers" in source.read_text(encoding="utf-8")
+    assert 'import { addTwoNumbers } from "./p_0002_add_two_numbers.js"' in test.read_text(
+        encoding="utf-8"
+    )
+
+
 @pytest.mark.parametrize("kind", ["class", "design"])
 def test_non_function_kind_requires_official_starter_code(tmp_path: Path, kind: str) -> None:
     with pytest.raises(ScaffoldError, match=rf"problem kind '{kind}'.*official starter code"):

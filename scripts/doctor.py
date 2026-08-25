@@ -42,6 +42,13 @@ HUSKY_GENERATED_HOOK = Path(".husky/_/pre-commit")
 HUSKY_LAUNCHER = Path(".husky/_/h")
 HUSKY_SOURCE_HOOK = Path(".husky/pre-commit")
 HUSKY_SOURCE_COMMAND = "mise exec -- uv run python scripts/ready.py staged"
+HUSKY_SOURCE_COMMANDS = [
+    "if ! git diff --quiet -- scripts .husky/pre-commit; then",
+    'echo "Unstaged tooling edits make the staged quality gate unsafe; stage or discard them." >&2',
+    "exit 1",
+    "fi",
+    HUSKY_SOURCE_COMMAND,
+]
 HUSKY_HOOK_LAUNCHER_PATTERN = re.compile(
     r"""(?mx)
     ^\s*(?:\.|source)\s+
@@ -417,11 +424,11 @@ def husky_source_hook_check(root: Path) -> Check:
         for line in contents.splitlines()
         if line.strip() and not line.lstrip().startswith("#")
     ]
-    if commands != [HUSKY_SOURCE_COMMAND]:
+    if commands != HUSKY_SOURCE_COMMANDS:
         return Check(
             "Husky source pre-commit hook",
             False,
-            f"must run only {HUSKY_SOURCE_COMMAND}; restore .husky/pre-commit",
+            f"must use the guarded {HUSKY_SOURCE_COMMAND}; restore .husky/pre-commit",
         )
     return Check("Husky source pre-commit hook", True, f"runs {HUSKY_SOURCE_COMMAND}")
 

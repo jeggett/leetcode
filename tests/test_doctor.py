@@ -78,7 +78,14 @@ def write_dependencies(
 def write_husky_installation(root: Path) -> None:
     source_hook = root / ".husky" / "pre-commit"
     source_hook.parent.mkdir(parents=True)
-    source_hook.write_text("mise exec -- uv run python scripts/ready.py staged\n", encoding="utf-8")
+    source_hook.write_text(
+        "if ! git diff --quiet -- scripts .husky/pre-commit; then\n"
+        '    echo "Unstaged tooling edits make the staged quality gate unsafe; stage or discard them." >&2\n'
+        "    exit 1\n"
+        "fi\n\n"
+        "mise exec -- uv run python scripts/ready.py staged\n",
+        encoding="utf-8",
+    )
 
     husky_directory = root / ".husky" / "_"
     husky_directory.mkdir(parents=True)

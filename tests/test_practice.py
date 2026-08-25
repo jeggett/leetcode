@@ -567,6 +567,30 @@ def test_retry_advances_past_private_typescript_methods(tmp_path: Path) -> None:
     assert "run(value: number): number" in source
 
 
+def test_retry_preserves_typescript_generator_methods(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0010",
+        "generator_method",
+        source=(
+            "export class Values {\n"
+            "    *values(): Generator<number> { yield 1; }\n"
+            "    size(): number { return 1; }\n"
+            "}\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "p_0010_generator_method.test.ts").write_text(
+        'import { Values } from "./p_0010_generator_method.js";\n', encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0010").path.read_text(encoding="utf-8")
+
+    assert "*values(): Generator<number>" in source
+    assert "size(): number" in source
+
+
 def test_retry_recreates_every_python_class_imported_by_the_test(tmp_path: Path) -> None:
     directory = make_problem(
         tmp_path,
@@ -624,6 +648,29 @@ def test_retry_recreates_classes_used_through_python_module_import(tmp_path: Pat
 
     assert "class TreeNode:" in source
     assert "class Codec:" in source
+
+
+def test_retry_initializes_safe_python_helper_attributes(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0295",
+        "tree_helper",
+        source=(
+            "class TreeNode:\n    def __init__(self, val: int) -> None:\n        self.val = val\n"
+        ),
+        metadata='kind = "design"\n',
+    )
+    (directory / "test_p_0295_tree_helper.py").write_text(
+        "from p_0295_tree_helper import TreeNode\n", encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0295", "py").path.read_text(encoding="utf-8")
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+    node = namespace["TreeNode"](1)
+
+    assert node.val == 1
 
 
 def test_retry_rejects_unsupported_python_solution_imports_before_writing(
@@ -752,6 +799,31 @@ def test_retry_preserves_builtin_dataclass_default_factories(tmp_path: Path) -> 
 
     assert "field(default_factory=list)" in source
     assert node.children == [1]
+
+
+def test_retry_drops_unresolved_dataclass_decorator_options(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0304",
+        "dataclass_option",
+        source=(
+            "from dataclasses import dataclass\n\n"
+            "ENABLE_ORDER = True\n\n"
+            "@dataclass(order=ENABLE_ORDER)\n"
+            "class Item:\n"
+            "    value: int\n"
+        ),
+    )
+    (directory / "test_p_0304_dataclass_option.py").write_text(
+        "from p_0304_dataclass_option import Item\n", encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0304", "py").path.read_text(encoding="utf-8")
+    namespace: dict[str, object] = {}
+    exec(source, namespace)
+
+    assert "ENABLE_ORDER" not in source
 
 
 def test_retry_preserves_python_property_setter_and_deleter(tmp_path: Path) -> None:

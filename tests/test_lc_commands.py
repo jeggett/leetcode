@@ -796,6 +796,15 @@ def test_builds_scoped_ready_commands(tmp_path: Path) -> None:
     )
 
 
+def test_ready_rejects_ambiguous_dual_language_branch_from_root(tmp_path: Path) -> None:
+    make_problem(tmp_path, "ts")
+    make_problem(tmp_path, "py")
+    git_run = branch_runner("feat/p-0035-search-insert-position")
+
+    with pytest.raises(lc.LcUsageError, match="exists in both languages"):
+        lc.build_command(("ready", "--current"), tmp_path, tmp_path, git_run=git_run)
+
+
 def test_builds_practice_commands_with_language_shorthand(tmp_path: Path) -> None:
     assert lc.build_command(("today", "py", "--limit", "2"), tmp_path, tmp_path) == (
         "python",

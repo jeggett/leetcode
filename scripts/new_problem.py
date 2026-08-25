@@ -363,10 +363,15 @@ def starter_export_name(language: str, starter_code: str) -> str | None:
     """Return the first top-level callable name exposed by official starter code."""
     if language == "ts":
         match = re.search(
-            r"(?m)^[ \t]*(?:export[ \t]+)?(?:(?:async[ \t]+)?function[ \t]*\*?[ \t]+|class[ \t]+)"
+            r"(?m)^[ \t]*(?:export[ \t]+)?(?:async[ \t]+)?function[ \t]*\*?[ \t]+"
             r"([A-Za-z_$][A-Za-z0-9_$]*)",
             starter_code,
         )
+        if match is None:
+            match = re.search(
+                r"(?m)^[ \t]*(?:export[ \t]+)?class[ \t]+([A-Za-z_$][A-Za-z0-9_$]*)",
+                starter_code,
+            )
     else:
         match = re.search(
             r"(?m)^[ \t]*class[ \t]+([A-Za-z_][A-Za-z0-9_]*)",

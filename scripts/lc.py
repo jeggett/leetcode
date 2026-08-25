@@ -1680,6 +1680,17 @@ def _ready_command(
             if values:
                 raise LcUsageError("no current problem detected; use 'lc ready --changed' or 'all'")
             return ("python", "scripts/ready.py", "changed")
+        if caller_cwd.resolve() == root.resolve():
+            problem_id = context.problem_id
+            languages = [
+                language
+                for language, directory_name in (("ts", "typescript"), ("py", "python"))
+                if matching_problem_directories(root / "src" / directory_name, problem_id)
+            ]
+            if len(languages) > 1:
+                raise LcUsageError(
+                    f"problem {problem_id} exists in both languages; run lc ready --changed or from a problem directory"
+                )
         return ("python", "scripts/ready.py", "current", context.language, context.problem_id)
     if scope == "--changed":
         return ("python", "scripts/ready.py", "changed")
