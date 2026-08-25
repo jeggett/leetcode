@@ -435,6 +435,28 @@ def test_retry_replaces_unresolved_python_method_defaults(tmp_path: Path) -> Non
     namespace["Formatter"]()
 
 
+def test_retry_preserves_keyword_and_positional_only_constructor_assignments(
+    tmp_path: Path,
+) -> None:
+    make_problem(
+        tmp_path,
+        "py",
+        "0005",
+        "constructor_parameters",
+        source=(
+            "class Node:\n"
+            "    def __init__(self, value: int, /, *, label: str):\n"
+            "        self.value = value\n"
+            "        self.label = label\n"
+        ),
+    )
+
+    source = retry(tmp_path, "0005", "py").path.read_text(encoding="utf-8")
+
+    assert "self.value = value" in source
+    assert "self.label = label" in source
+
+
 def test_all_language_is_restricted_to_reporting_commands(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -1143,6 +1165,47 @@ def test_retry_preserves_public_typescript_class_fields(tmp_path: Path) -> None:
     assert "public left!: TreeNode | null;" in source
     assert "secret" not in source
     assert "this.val = val" not in source
+
+
+def test_retry_rejects_initialized_typescript_helper_fields(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0009",
+        "helper_state",
+        source=(
+            "export class Node { val: number = 1; }\n"
+            "export function solve(node: Node): number { return node.val; }\n"
+        ),
+    )
+    (directory / "p_0009_helper_state.test.ts").write_text(
+        'import { Node, solve } from "./p_0009_helper_state.js";\n', encoding="utf-8"
+    )
+
+    with pytest.raises(PracticeError, match="constructor state"):
+        retry(tmp_path, "0009")
+
+
+def test_retry_balances_composite_typescript_defaults(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0010",
+        "composite_default",
+        source=(
+            "const SEP = ':';\n"
+            "export function solve(options = { separator: SEP, limit: 1 }): number "
+            "{ return options.limit; }\n"
+        ),
+    )
+    (directory / "p_0010_composite_default.test.ts").write_text(
+        'import { solve } from "./p_0010_composite_default.js";\n', encoding="utf-8"
+    )
+
+    source = retry(tmp_path, "0010").path.read_text(encoding="utf-8")
+
+    assert "solve(options = undefined): number" in source
+    assert "limit: 1 }" not in source
 
 
 def test_retry_carries_referenced_typescript_helper_classes(tmp_path: Path) -> None:

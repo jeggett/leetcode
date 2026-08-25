@@ -2002,11 +2002,94 @@ def _typescript_function_signatures(source: str) -> dict[str, str]:
 def _typescript_sanitize_retry_defaults(signature: str) -> str:
     """Replace defaults that can depend on declarations omitted from a retry."""
 
-    unsafe_default = re.compile(
-        r"=\s*(?![-+]?\d+(?:\.\d+)?\b|true\b|false\b|null\b|undefined\b|[\"'`])"
-        r"(?:[^,()]|\([^()]*\))*(?=\s*[,\)])"
+    safe_default = re.compile(
+        r"\s*(?:[-+]?\d+(?:\.\d+)?\b|true\b|false\b|null\b|undefined\b|[\"'`])"
     )
-    return unsafe_default.sub("= undefined", signature)
+    replacements: list[tuple[int, int]] = []
+    index = 0
+    while index < len(signature):
+        if signature[index] != "=" or (index + 1 < len(signature) and signature[index + 1] == ">"):
+            index += 1
+            continue
+        start = index + 1
+        cursor = start
+        stack: list[str] = []
+        quote: str | None = None
+        escaped = False
+        while cursor < len(signature):
+            character = signature[cursor]
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif character == "\\":
+                    escaped = True
+                elif character == quote:
+                    quote = None
+            elif character in {"'", '"', "`"}:
+                quote = character
+            elif character in "([{":
+                stack.append({"(": ")", "[": "]", "{": "}"}[character])
+            elif stack and character == stack[-1]:
+                stack.pop()
+            elif not stack and character in {",", ")"}:
+                break
+            cursor += 1
+        if not safe_default.match(signature[start:cursor]):
+            replacements.append((index, cursor))
+        index = max(cursor, index + 1)
+    for start, end in reversed(replacements):
+        signature = f"{signature[:start]}= undefined{signature[end:]}"
+    return signature
+
+
+def _typescript_class_has_initialized_field(source: str, class_match: re.Match[str]) -> bool:
+    """Return whether a class has field state that a blank retry would discard."""
+
+    opening = source.find("{", class_match.start(), class_match.end())
+    if opening == -1:
+        return False
+    closing = _typescript_matching_brace(source, opening)
+    if closing is None:
+        return False
+    member_start = opening + 1
+    index = member_start
+    while index < closing:
+        character = source[index]
+        if character == "{":
+            member_closing = _typescript_matching_brace(source, index)
+            if member_closing is None or member_closing > closing:
+                return False
+            if _typescript_class_member_candidate(source[member_start:index]) is not None:
+                member_start = member_closing + 1
+            index = member_closing
+        elif character in {";", "\n"}:
+            candidate = source[member_start:index]
+            if _typescript_class_field_header(candidate) is not None and re.search(
+                r"(?<![=!<>])=(?!=|>)", candidate
+            ):
+                return True
+            if character == ";" or not candidate.strip():
+                member_start = index + 1
+        index += 1
+    return False
+
+
+def _typescript_class_has_constructor_state(source: str, class_match: re.Match[str]) -> bool:
+    """Return whether a class constructor assigns instance state."""
+
+    opening = source.find("{", class_match.start(), class_match.end())
+    if opening == -1:
+        return False
+    closing = _typescript_matching_brace(source, opening)
+    if closing is None:
+        return False
+    return bool(
+        re.search(
+            r"constructor\s*\([^)]*\)\s*\{[^}]*\bthis\.[A-Za-z_$][A-Za-z0-9_$]*\s*=",
+            source[opening + 1 : closing],
+            re.DOTALL,
+        )
+    )
 
 
 def _typescript_function_retry_source(signature: str) -> str:
@@ -2041,15 +2124,12 @@ def _typescript_retry_exports(
     if "*" in requested_names:
         requested_names = [*functions, *classes, *declarations]
     requested_classes = [name for name in requested_names if name in classes]
-    if (
-        requested_classes
-        and len(requested_names) > 1
-        and re.search(
-            r"constructor\s*\([^)]*\)\s*\{[^}]*\bthis\.[A-Za-z_$][A-Za-z0-9_$]*\s*=",
-            source,
-            re.DOTALL,
-        )
-    ):
+    stateful_helper = any(
+        _typescript_class_has_initialized_field(source, classes[name])
+        or _typescript_class_has_constructor_state(source, classes[name])
+        for name in requested_classes
+    )
+    if requested_classes and len(requested_names) > 1 and stateful_helper:
         raise PracticeError(
             "retry cannot safely recreate imported TypeScript helper classes with constructor state"
         )
@@ -2273,6 +2353,14 @@ def _python_class_retry_source(
         rendered.append(f"    {_python_method_signature(method)}:")
         if method.name == "__init__":
             assignments = []
+            constructor_parameters = {
+                argument.arg
+                for argument in (
+                    *method.args.posonlyargs,
+                    *method.args.args,
+                    *method.args.kwonlyargs,
+                )
+            }
             for statement in method.body:
                 if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
                     target = statement.targets[0]
@@ -2288,7 +2376,7 @@ def _python_class_retry_source(
                     and target.value.id == "self"
                     and (
                         isinstance(value, ast.Name)
-                        and value.id in {argument.arg for argument in method.args.args}
+                        and value.id in constructor_parameters
                         or _python_self_contained_default(value)
                     )
                 ):
