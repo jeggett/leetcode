@@ -74,11 +74,8 @@ def test_builds_existing_focused_runner_commands(tmp_path: Path) -> None:
         "test:py",
         str(python_test.relative_to(tmp_path)),
     ]
-    assert focused_command(tmp_path, "py", "92", watch=True) == [
-        "pnpm",
-        "test:py:watch",
-        str(python_test.relative_to(tmp_path)),
-    ]
+    with pytest.raises(TestOneError, match="only supported for TypeScript"):
+        focused_command(tmp_path, "py", "92", watch=True)
     assert focused_command(
         tmp_path,
         "ts",

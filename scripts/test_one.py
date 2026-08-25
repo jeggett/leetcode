@@ -81,6 +81,8 @@ def focused_command(
     runner_args: Sequence[str] = (),
 ) -> list[str]:
     """Return the existing package runner command for one colocated test file."""
+    if watch and language == "py":
+        raise TestOneError("watch mode is only supported for TypeScript")
     paths = resolve_problem_paths(root, language, problem_id)
     test_path = require_test_path(paths)
     script = f"test:{language}:watch" if watch else f"test:{language}"
