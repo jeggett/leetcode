@@ -7,6 +7,7 @@ import pytest
 from scripts.ready import (
     CommandResult,
     ReadyError,
+    changed_paths,
     changed_problem_keys,
     problem_commands,
     run_changed_gate,
@@ -106,6 +107,24 @@ def test_changed_paths_select_problems_and_escalate_tooling() -> None:
 
     _, full = changed_problem_keys(["scripts/lc.py"])
     assert full is True
+
+
+def test_changed_paths_combines_committed_and_worktree_changes(tmp_path: Path) -> None:
+    def git_run(command: tuple[str, ...], _cwd: Path) -> CommandResult:
+        if command[1:3] == ("symbolic-ref", "--quiet"):
+            return CommandResult(0, "origin/main\n")
+        if command[1] == "merge-base":
+            return CommandResult(0, "abc123\n")
+        if command[-1] == "abc123..HEAD":
+            return CommandResult(0, "src/python/p_0001_one/p_0001_one.py\n")
+        if command[1] == "diff":
+            return CommandResult(0, "src/python/p_0002_two/p_0002_two.py\n")
+        return CommandResult(0, "")
+
+    assert changed_paths(tmp_path, git_run=git_run) == [
+        "src/python/p_0001_one/p_0001_one.py",
+        "src/python/p_0002_two/p_0002_two.py",
+    ]
 
     _, full = changed_problem_keys(["bin/lc"])
     assert full is True

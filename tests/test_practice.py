@@ -1440,3 +1440,28 @@ def test_retry_rejects_enum_runtime_dependencies(tmp_path: Path) -> None:
     )
     with pytest.raises(PracticeError, match="enum Mode"):
         retry(tmp_path, "0906")
+
+
+def test_retry_rejects_dataclass_pseudo_fields(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0907",
+        "pseudo",
+        source="from dataclasses import KW_ONLY, dataclass\n@dataclass\nclass Item:\n    _: KW_ONLY\n    value: int\n",
+    )
+    (directory / "test_p_0907_pseudo.py").write_text(
+        "from p_0907_pseudo import Item\n", encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="pseudo-fields"):
+        retry(tmp_path, "0907", "py")
+
+
+def test_retry_rejects_dynamic_solution_imports(tmp_path: Path) -> None:
+    directory = make_problem(tmp_path, "ts", "0908", "dynamic_solution")
+    (directory / "p_0908_dynamic_solution.test.ts").write_text(
+        'test("dynamic", async () => { const { solve } = await import("./p_0908_dynamic_solution.js"); expect(solve(1)).toBe(1); });\n',
+        encoding="utf-8",
+    )
+    with pytest.raises(PracticeError, match="dynamic solution import"):
+        retry(tmp_path, "0908")

@@ -1917,25 +1917,10 @@ def _rewrite_typescript_retry_test(
     )
     source_path = problem.source_path.resolve()
 
-    def position_is_code(position: int) -> bool:
-        index = 0
-        while index < position:
-            if test_source.startswith("//", index):
-                newline = test_source.find("\n", index + 2)
-                index = len(test_source) if newline == -1 else newline + 1
-                continue
-            if test_source.startswith("/*", index):
-                closing = test_source.find("*/", index + 2)
-                index = len(test_source) if closing == -1 else closing + 2
-                continue
-            if test_source[index] in {"'", '"', "`"}:
-                index = _typescript_quoted_end(test_source, index)
-                continue
-            index += 1
-        return index == position
-
     def replace(match: re.Match[str]) -> str:
-        if "(" in match["lead"] and not position_is_code(match.start("lead")):
+        if "(" in match["lead"] and not _typescript_position_is_code(
+            test_source, match.start("lead")
+        ):
             return match.group(0)
         import_name = match["path"]
         target = _resolve_typescript_import(original_test.parent, import_name, repository_root)
@@ -1957,6 +1942,26 @@ def _rewrite_typescript_retry_test(
     return import_pattern.sub(replace, test_source)
 
 
+def _typescript_position_is_code(source: str, position: int) -> bool:
+    """Return whether a TypeScript offset is outside comments and quoted literals."""
+
+    index = 0
+    while index < position:
+        if source.startswith("//", index):
+            newline = source.find("\n", index + 2)
+            index = len(source) if newline == -1 else newline + 1
+            continue
+        if source.startswith("/*", index):
+            closing = source.find("*/", index + 2)
+            index = len(source) if closing == -1 else closing + 2
+            continue
+        if source[index] in {"'", '"', "`"}:
+            index = _typescript_quoted_end(source, index)
+            continue
+        index += 1
+    return index == position
+
+
 def _typescript_imported_bindings(problem: Problem) -> tuple[tuple[str, str], ...]:
     """Find source-export/local-name pairs imported by the colocated TypeScript test."""
 
@@ -1965,6 +1970,16 @@ def _typescript_imported_bindings(problem: Problem) -> tuple[tuple[str, str], ..
         return ()
     source_stem = problem.source_path.stem
     bindings: list[tuple[str, str]] = []
+    dynamic_imports = re.compile(r"\bimport\s*\(\s*[\"'](?P<path>\.[^\"']+)[\"']")
+    for imported in dynamic_imports.finditer(test_source):
+        if not _typescript_position_is_code(test_source, imported.start()):
+            continue
+        module_stem = Path(imported["path"]).stem
+        if module_stem == source_stem:
+            raise PracticeError(
+                "retry cannot safely infer exports from a dynamic solution import; "
+                "use a static import or create the retry manually"
+            )
     imports = re.compile(
         r"(?ms)^[ \t]*import[ \t]+(?P<spec>(?:(?!;).)+?)[ \t]+from[ \t]+"
         r"[\"'](?P<path>[^\"']+)[\"']"
@@ -2630,6 +2645,24 @@ def _python_retry_source(problem: Problem) -> str:
         raise PracticeError(
             "retry cannot safely recreate dataclass post-init state for "
             + ", ".join(post_init_classes)
+        )
+    pseudo_field_classes = []
+    for class_node in imported_classes:
+        if _python_dataclass_decorator(class_node) is None:
+            continue
+        for node in class_node.body:
+            if not isinstance(node, ast.AnnAssign):
+                continue
+            annotation_names = {
+                item.id for item in ast.walk(node.annotation) if isinstance(item, ast.Name)
+            }
+            if annotation_names & {"KW_ONLY", "ClassVar", "InitVar"}:
+                pseudo_field_classes.append(class_node.name)
+                break
+    if pseudo_field_classes:
+        raise PracticeError(
+            "retry cannot safely recreate dataclass pseudo-fields for "
+            + ", ".join(pseudo_field_classes)
         )
     if source is not None and imported_classes:
         needs_dataclass_import = any(

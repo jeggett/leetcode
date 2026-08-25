@@ -249,18 +249,41 @@ def run_problem_gate(
 
 
 def changed_paths(root: Path, *, git_run: GitRunner = run_git) -> list[str]:
-    """Return tracked and untracked paths changed from HEAD."""
+    """Return branch, worktree, and untracked paths changed from the default branch."""
     tracked = git_run(("git", "diff", "--name-only", "--diff-filter=ACMRD", "HEAD"), root)
     if tracked.returncode != 0:
         tracked = git_run(("git", "diff", "--name-only", "--diff-filter=ACMRD"), root)
         if tracked.returncode != 0:
             raise _git_error(tracked, "could not inspect Git diff")
+    branch_paths: set[str] = set()
+    default_branch = git_run(
+        ("git", "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"), root
+    )
+    if default_branch.returncode == 0 and default_branch.stdout.strip():
+        base = default_branch.stdout.strip()
+        merge_base = git_run(("git", "merge-base", "HEAD", base), root)
+        if merge_base.returncode == 0 and merge_base.stdout.strip():
+            committed = git_run(
+                (
+                    "git",
+                    "diff",
+                    "--name-only",
+                    "--diff-filter=ACMRD",
+                    f"{merge_base.stdout.strip()}..HEAD",
+                ),
+                root,
+            )
+            if committed.returncode != 0:
+                raise _git_error(committed, "could not inspect committed branch diff")
+            branch_paths.update(committed.stdout.splitlines())
     untracked = git_run(("git", "ls-files", "--others", "--exclude-standard"), root)
     if untracked.returncode != 0:
         raise ReadyError(
             (untracked.stderr or untracked.stdout).strip() or "could not inspect files"
         )
-    return sorted(set(tracked.stdout.splitlines()) | set(untracked.stdout.splitlines()))
+    return sorted(
+        branch_paths | set(tracked.stdout.splitlines()) | set(untracked.stdout.splitlines())
+    )
 
 
 def staged_paths(root: Path, *, git_run: GitRunner = run_git) -> list[str]:
