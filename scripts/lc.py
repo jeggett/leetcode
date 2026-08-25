@@ -1199,7 +1199,14 @@ def _configured_base_branch(root: Path, value: str | None = None) -> str:
         except OSError:
             value = None
     branch = (value or os.environ.get("LC_BASE_BRANCH") or DEFAULT_BASE_BRANCH).strip()
-    if not branch or any(character.isspace() for character in branch):
+    if (
+        not branch
+        or branch.startswith("-")
+        or any(character.isspace() for character in branch)
+        or any(token in branch for token in ("..", "~", "^", ":", "?", "*", "[", "\\"))
+        or branch.endswith(("/", ".", ".lock"))
+        or "//" in branch
+    ):
         raise LcUsageError("base branch must be a non-empty Git branch name")
     return branch
 

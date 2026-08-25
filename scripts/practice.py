@@ -476,7 +476,9 @@ def _merge_metadata(
         signature=primary.signature or fallback.signature,
         tags=tags,
         notes=primary.notes or fallback.notes,
-        kind=primary.kind or fallback.kind,
+        kind=(
+            fallback.kind if fallback.kind == "language-drill" else primary.kind or fallback.kind
+        ),
         problem_id=primary.problem_id or fallback.problem_id,
         source_path=primary.source_path or fallback.source_path,
     )
@@ -1999,6 +2001,7 @@ def _typescript_function_retry_source(signature: str) -> str:
         signature = f"export function {signature}"
     if not signature.startswith("export ") and "export default" not in signature:
         signature = f"export {signature}"
+    signature = re.sub(r"=\s*[A-Za-z_$][A-Za-z0-9_$]*(?=\s*[,\)])", "= undefined", signature)
     return (
         "/* Blank interview retry artifact. The accepted solution is intentionally not copied. */\n"
         f"{signature} {{\n"
@@ -2021,6 +2024,15 @@ def _typescript_retry_exports(
     requested_names = [name for name, _local_name in bindings]
     if "*" in requested_names:
         requested_names = [*functions, *classes, *declarations]
+    requested_classes = [name for name in requested_names if name in classes]
+    if len(requested_classes) > 1 and re.search(
+        r"constructor\s*\([^)]*\)\s*\{[^}]*\bthis\.[A-Za-z_$][A-Za-z0-9_$]*\s*=",
+        source,
+        re.DOTALL,
+    ):
+        raise PracticeError(
+            "retry cannot safely recreate multiple imported TypeScript classes with constructor state"
+        )
 
     rendered: list[str] = []
     for name in dict.fromkeys(requested_names):
