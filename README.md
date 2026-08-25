@@ -81,10 +81,10 @@ uv sync --frozen
 pnpm prepare
 ```
 
-`pnpm prepare` installs the Husky pre-commit hook explicitly. The hook runs
+`pnpm prepare` installs the Lefthook pre-commit hook explicitly. The hook runs
 `mise exec -- pnpm ready`, so commits use the repository's pinned tools even if the interactive
-shell has different global versions. Run `pnpm prepare` again if `lc doctor` reports that
-`core.hooksPath` is not `.husky/_`.
+shell has different global versions. Run `pnpm prepare` again if `lc doctor` reports a missing
+generated hook.
 
 Once `mise` is activated in the shell and this repository is trusted, its configuration adds
 `bin/` to `PATH`. That makes the repository-local `lc` command available from the repository and

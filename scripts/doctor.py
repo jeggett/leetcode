@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Report whether a checkout is ready to run the repository quality gate.
 
-The command is deliberately read-only: it only inspects configuration and runs
-version/configuration queries.  Keeping the checks injectable also makes its
-diagnostics straightforward to test without depending on a developer machine.
+The command is deliberately read-only. It inspects configuration, installed
+dependency metadata, and a few platform integrations without trying to repair
+anything. All command and executable lookups are injectable so the checks
+remain useful in tests and when the normal project toolchain is unavailable.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ import shutil
 import subprocess
 import sys
 import tomllib
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,12 +30,16 @@ VERSION_COMMANDS = {
 }
 VERSION_PATTERN = re.compile(r"v?(\d+(?:\.\d+){0,2})")
 PACKAGE_MANAGER_PATTERN = re.compile(r"pnpm@v?(\d+(?:\.\d+){0,2})")
+
+NODE_DEPENDENCIES = ("@biomejs/biome", "typescript", "vitest", "lefthook")
+PYTHON_DEPENDENCIES = ("pytest", "ruff")
+# Compatibility names retained for callers that used the original
+# representative-dependency checks.
 NODE_DEPENDENCY = "vitest"
 PYTHON_DEPENDENCY = "pytest"
-HUSKY_GENERATED_HOOK = Path(".husky/_/pre-commit")
-HUSKY_LAUNCHER = Path(".husky/_/h")
-HUSKY_SOURCE_HOOK = Path(".husky/pre-commit")
-HUSKY_SOURCE_COMMAND = "mise exec -- pnpm ready"
+
+LEFTHOOK_CONFIG = Path("lefthook.yml")
+LEFTHOOK_COMMAND = "mise exec -- pnpm ready"
 HUSKY_HOOK_LAUNCHER_PATTERN = re.compile(
     r"""(?mx)
     ^\s*(?:\.|source)\s+
@@ -46,6 +51,7 @@ HUSKY_LAUNCHER_PATH_PATTERN = re.compile(r"(?m)^\s*s\s*=[^\n]*\$n\b")
 HUSKY_LAUNCHER_COMMAND_PATTERN = re.compile(
     r"""(?m)^\s*sh\s+-e\s+["']?\$s["']?\s+["']?\$@["']?\s*$"""
 )
+WSL_MOUNT_PATTERN = re.compile(r"^/mnt/[a-z](?:/|$)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -59,7 +65,7 @@ class Check:
 
 @dataclass(frozen=True)
 class CommandResult:
-    """The limited command result needed by the checker."""
+    """The limited command result needed by this module."""
 
     returncode: int
     stdout: str = ""
@@ -72,14 +78,25 @@ CommandFinder = Callable[[str], str | None]
 
 def run_command(command: Sequence[str], cwd: Path) -> CommandResult:
     """Run a read-only command and return only the fields used by this module."""
-    completed = subprocess.run(
-        command,
-        cwd=cwd,
-        capture_output=True,
-        check=False,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            command,
+            cwd=cwd,
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+    except OSError as error:
+        return CommandResult(1, stderr=str(error))
     return CommandResult(completed.returncode, completed.stdout, completed.stderr)
+
+
+def _run(run: CommandRunner, command: Sequence[str], cwd: Path) -> CommandResult:
+    """Call an injected runner while keeping diagnostics alive on stub failures."""
+    try:
+        return run(command, cwd)
+    except (KeyError, OSError, TypeError, ValueError) as error:
+        return CommandResult(1, stderr=str(error))
 
 
 def parse_version(output: str) -> str | None:
@@ -89,8 +106,12 @@ def parse_version(output: str) -> str | None:
 
 
 def read_metadata(root: Path) -> tuple[dict[str, str], dict[str, object], dict[str, object]]:
-    """Read the tool and dependency metadata required for setup checks."""
-    node_version = (root / ".node-version").read_text(encoding="utf-8").strip()
+    """Read the pinned tool and dependency metadata required for setup checks."""
+    node_version_file = (root / ".node-version").read_text(encoding="utf-8").strip()
+    node_file_match = VERSION_PATTERN.fullmatch(node_version_file)
+    if node_file_match is None:
+        raise ValueError(".node-version must contain one dotted Node version")
+
     with (root / "mise.toml").open("rb") as mise_file:
         mise_data = tomllib.load(mise_file)
     with (root / "package.json").open(encoding="utf-8") as package_file:
@@ -103,18 +124,25 @@ def read_metadata(root: Path) -> tuple[dict[str, str], dict[str, object], dict[s
         isinstance(name, str) and isinstance(version, str) for name, version in tools.items()
     ):
         raise ValueError("mise.toml has no valid [tools] table")
-    if "node" in tools:
-        raise ValueError("mise.toml must not pin Node; use .node-version")
-    if "pnpm" in tools:
-        raise ValueError("mise.toml must not pin pnpm; use package.json packageManager")
-    node_match = VERSION_PATTERN.fullmatch(node_version)
-    if node_match is None:
-        raise ValueError(".node-version must contain one dotted Node version")
+
+    if "pnpm" not in tools and "npm:pnpm" in tools:
+        tools["pnpm"] = tools["npm:pnpm"]
+    missing_tools = [name for name in ("node", "pnpm", "python", "uv") if name not in tools]
+    if missing_tools:
+        raise ValueError("mise.toml must pin project tools: " + ", ".join(missing_tools))
+    if node_file_match.group(1) != tools["node"]:
+        raise ValueError(
+            f".node-version ({node_file_match.group(1)}) does not match mise.toml node ({tools['node']})"
+        )
+    for name in ("node", "pnpm", "python", "uv"):
+        if VERSION_PATTERN.fullmatch(tools[name]) is None:
+            raise ValueError(f"mise.toml {name} pin must contain one dotted version")
+
     if not isinstance(package_data, dict):
         raise ValueError("package.json must contain an object")
     if not isinstance(project_data, dict):
         raise ValueError("pyproject.toml must contain an object")
-    return {"node": node_match.group(1), **tools}, package_data, project_data
+    return dict(tools), package_data, project_data
 
 
 def expected_package_manager_version(package: dict[str, object]) -> str | None:
@@ -129,18 +157,20 @@ def expected_package_manager_version(package: dict[str, object]) -> str | None:
 
 
 def metadata_checks(tools: dict[str, str], package: dict[str, object]) -> list[Check]:
-    """Check package metadata is consistent with the repository's pinned tool versions."""
+    """Check package metadata is consistent with the project-local tool pins."""
     checks: list[Check] = []
 
     package_manager = package.get("packageManager")
-    expected_pnpm = expected_package_manager_version(package)
+    expected_pnpm = tools.get("pnpm")
+    package_pnpm = expected_package_manager_version(package)
+    package_manager_ok = package_pnpm is not None and package_pnpm == expected_pnpm
     checks.append(
         Check(
             "packageManager",
-            expected_pnpm is not None,
-            f"{package_manager!s}"
-            if expected_pnpm is not None
-            else f"{package_manager!s}; expected pnpm@<version>",
+            package_manager_ok,
+            f"{package_manager}"
+            if package_manager_ok
+            else f"{package_manager!s}; expected pnpm@{expected_pnpm}",
         )
     )
 
@@ -166,6 +196,20 @@ def metadata_checks(tools: dict[str, str], package: dict[str, object]) -> list[C
                 else f"{node_version} does not satisfy {node_requirement}",
             )
         )
+
+    pnpm_requirement = engines.get("pnpm") if isinstance(engines, dict) else None
+    if pnpm_requirement is not None:
+        expected_engine = str(expected_pnpm) if expected_pnpm is not None else ""
+        engine_version = str(pnpm_requirement).removeprefix("pnpm@")
+        checks.append(
+            Check(
+                "pnpm engine",
+                engine_version == expected_engine,
+                str(pnpm_requirement)
+                if engine_version == expected_engine
+                else f"expected {expected_engine}",
+            )
+        )
     return checks
 
 
@@ -185,20 +229,17 @@ def version_checks(
     """Compare installed runtime versions with the repository's metadata pins."""
     checks: list[Check] = []
     for command, invocation in VERSION_COMMANDS.items():
-        expected = (
-            expected_package_manager_version(package) if command == "pnpm" else tools.get(command)
-        )
+        expected = tools.get(command)
+        if expected is None and command == "pnpm":
+            expected = expected_package_manager_version(package)
         if expected is None:
-            source = (
-                "package.json packageManager" if command == "pnpm" else ".node-version or mise.toml"
-            )
-            checks.append(Check(f"{command} version", False, f"not pinned in {source}"))
+            checks.append(Check(f"{command} version", False, "not pinned in mise.toml"))
             continue
         if command not in available:
             checks.append(Check(f"{command} version", False, "command is unavailable"))
             continue
 
-        result = run(invocation, root)
+        result = _run(run, invocation, root)
         found = parse_version(result.stdout or result.stderr)
         passed = result.returncode == 0 and found == expected
         if result.returncode != 0:
@@ -280,14 +321,9 @@ def distribution_metadata(path: Path) -> dict[str, str]:
 
 def installed_python_dependency_version(root: Path, dependency: str) -> str | None:
     """Read a local Python dependency's version without importing it."""
-    package_directory = dependency.replace("-", "_")
     normalized_dependency = re.sub(r"[-_.]+", "-", dependency).lower()
     for site_packages in python_site_packages(root):
-        if not (site_packages / package_directory / "__init__.py").is_file():
-            continue
-        for metadata_path in sorted(
-            site_packages.glob(f"{package_directory}-*.dist-info/METADATA")
-        ):
+        for metadata_path in sorted(site_packages.glob("*.dist-info/METADATA")):
             metadata = distribution_metadata(metadata_path)
             installed_name = metadata.get("Name", "")
             normalized_name = re.sub(r"[-_.]+", "-", installed_name).lower()
@@ -316,23 +352,29 @@ def dependency_check(
 def dependency_checks(
     root: Path, package: dict[str, object], project: dict[str, object]
 ) -> list[Check]:
-    """Verify representative locked dependencies instead of empty install directories."""
-    return [
-        dependency_check(
-            "node_modules (vitest)",
-            NODE_DEPENDENCY,
-            package_dependency_version(package, NODE_DEPENDENCY),
-            installed_node_dependency_version(root, NODE_DEPENDENCY),
-            "run pnpm install --frozen-lockfile",
-        ),
-        dependency_check(
-            ".venv (pytest)",
-            PYTHON_DEPENDENCY,
-            project_dependency_version(project, PYTHON_DEPENDENCY),
-            installed_python_dependency_version(root, PYTHON_DEPENDENCY),
-            "run uv sync --frozen",
-        ),
-    ]
+    """Verify the local quality tools instead of merely checking directory existence."""
+    checks: list[Check] = []
+    for dependency in NODE_DEPENDENCIES:
+        checks.append(
+            dependency_check(
+                f"node_modules ({dependency})",
+                dependency,
+                package_dependency_version(package, dependency),
+                installed_node_dependency_version(root, dependency),
+                "run pnpm install --frozen-lockfile",
+            )
+        )
+    for dependency in PYTHON_DEPENDENCIES:
+        checks.append(
+            dependency_check(
+                f".venv ({dependency})",
+                dependency,
+                project_dependency_version(project, dependency),
+                installed_python_dependency_version(root, dependency),
+                "run uv sync --frozen",
+            )
+        )
+    return checks
 
 
 def read_text_file(path: Path) -> str | None:
@@ -348,91 +390,134 @@ def is_executable(path: Path) -> bool:
     return os.name != "posix" or os.access(path, os.X_OK)
 
 
-def husky_source_hook_check(root: Path) -> Check:
-    """Verify Husky has the tracked hook that its generated launcher invokes."""
-    contents = read_text_file(root / HUSKY_SOURCE_HOOK)
+def mise_trust_check(root: Path, available: set[str], run: CommandRunner) -> Check:
+    """Verify the project config is trusted without trusting it as a side effect."""
+    if "mise" not in available:
+        return Check("mise trust", False, "mise command is unavailable")
+    result = _run(run, ("mise", "trust", "--show"), root)
+    output = "\n".join(part for part in (result.stdout, result.stderr) if part)
+    if result.returncode != 0:
+        return Check("mise trust", False, "could not inspect trust; run mise trust")
+    if re.search(r"\buntrusted\b", output, re.IGNORECASE):
+        return Check("mise trust", False, "mise.toml is untrusted; run mise trust")
+    if re.search(r"\btrusted\b", output, re.IGNORECASE):
+        return Check("mise trust", True, "mise.toml is trusted")
+    return Check("mise trust", False, "could not find mise.toml trust status; run mise trust")
+
+
+def lefthook_config_check(root: Path) -> Check:
+    """Verify the tracked Lefthook pre-commit command."""
+    contents = read_text_file(root / LEFTHOOK_CONFIG)
     if contents is None:
-        return Check("Husky source pre-commit hook", False, "missing; restore .husky/pre-commit")
-    commands = [
-        line.strip()
-        for line in contents.splitlines()
-        if line.strip() and not line.lstrip().startswith("#")
-    ]
-    if commands != [HUSKY_SOURCE_COMMAND]:
-        return Check(
-            "Husky source pre-commit hook",
-            False,
-            f"must run only {HUSKY_SOURCE_COMMAND}; restore .husky/pre-commit",
-        )
-    return Check("Husky source pre-commit hook", True, f"runs {HUSKY_SOURCE_COMMAND}")
+        return Check("Lefthook pre-commit config", False, "missing; restore lefthook.yml")
+    lines = contents.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == "pre-commit:")
+    except StopIteration:
+        return Check("Lefthook pre-commit config", False, f"must run {LEFTHOOK_COMMAND}")
+    block: list[str] = []
+    for line in lines[start + 1 :]:
+        if line and not line[0].isspace() and not line.lstrip().startswith("#"):
+            break
+        block.append(line)
+    active_run = re.compile(rf"\s+run:\s*['\"]?{re.escape(LEFTHOOK_COMMAND)}['\"]?\s*(?:#.*)?")
+    if not any(active_run.fullmatch(line) for line in block):
+        return Check("Lefthook pre-commit config", False, f"must run {LEFTHOOK_COMMAND}")
+    return Check("Lefthook pre-commit config", True, f"runs {LEFTHOOK_COMMAND}")
 
 
-def husky_generated_hook_check(root: Path) -> Check:
-    """Verify the generated Git hook sources Husky's launcher rather than doing nothing."""
-    hook_path = root / HUSKY_GENERATED_HOOK
+def lefthook_generated_hook_check(root: Path, run: CommandRunner) -> Check:
+    """Verify Lefthook installed an executable Git pre-commit hook."""
+    result = _run(
+        run,
+        ("git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit"),
+        root,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        return Check("Lefthook generated pre-commit hook", False, "cannot resolve Git hook path")
+    hook_path = Path(result.stdout.strip())
     contents = read_text_file(hook_path)
     if contents is None:
-        return Check("Husky generated pre-commit hook", False, "missing; run pnpm prepare")
-    if not HUSKY_HOOK_LAUNCHER_PATTERN.search(contents):
-        return Check(
-            "Husky generated pre-commit hook",
-            False,
-            "does not source .husky/_/h; run pnpm prepare",
-        )
+        return Check("Lefthook generated pre-commit hook", False, "missing; run pnpm prepare")
+    if "lefthook" not in contents.lower():
+        return Check("Lefthook generated pre-commit hook", False, "not generated by Lefthook")
     if not is_executable(hook_path):
-        return Check("Husky generated pre-commit hook", False, "not executable; run pnpm prepare")
-    return Check("Husky generated pre-commit hook", True, "sources Husky launcher")
-
-
-def husky_launcher_check(root: Path) -> Check:
-    """Verify the generated launcher has the basic Husky hook-dispatch contract."""
-    launcher_path = root / HUSKY_LAUNCHER
-    contents = read_text_file(launcher_path)
-    if contents is None:
-        return Check("Husky launcher", False, "missing; run pnpm prepare")
-
-    first_line = contents.splitlines()[0] if contents else ""
-    valid_launcher = (
-        first_line.startswith("#!")
-        and HUSKY_LAUNCHER_NAME_PATTERN.search(contents) is not None
-        and HUSKY_LAUNCHER_PATH_PATTERN.search(contents) is not None
-        and HUSKY_LAUNCHER_COMMAND_PATTERN.search(contents) is not None
-    )
-    if not valid_launcher:
         return Check(
-            "Husky launcher", False, "does not look like a Husky launcher; run pnpm prepare"
+            "Lefthook generated pre-commit hook", False, "not executable; run pnpm prepare"
         )
-    if not is_executable(launcher_path):
-        return Check("Husky launcher", False, "not executable; run pnpm prepare")
-    return Check("Husky launcher", True, "dispatches the tracked hook")
+    return Check("Lefthook generated pre-commit hook", True, "dispatches Lefthook")
 
 
-def husky_checks(root: Path, available: set[str], run: CommandRunner) -> list[Check]:
-    """Verify Git's Husky configuration and a functional generated hook chain."""
-    checks: list[Check] = []
-    if "git" not in available:
-        checks.append(Check("git core.hooksPath", False, "git command is unavailable"))
+def lefthook_checks(root: Path, available: set[str], run: CommandRunner) -> list[Check]:
+    """Verify tracked and installed Lefthook configuration."""
+    return [lefthook_config_check(root), lefthook_generated_hook_check(root, run)]
+
+
+def clipboard_check(
+    find_command: CommandFinder = shutil.which,
+    *,
+    platform: str | None = None,
+) -> Check:
+    """Check that a supported native or WSL clipboard command is available."""
+    effective_platform = sys.platform if platform is None else platform
+    if effective_platform.startswith("win"):
+        candidates = ("clip",)
+    elif effective_platform == "darwin":
+        candidates = ("pbcopy",)
     else:
-        hooks_path = run(("git", "config", "--get", "core.hooksPath"), root)
-        configured_path = hooks_path.stdout.strip() if hooks_path.returncode == 0 else ""
-        checks.append(
-            Check(
-                "git core.hooksPath",
-                configured_path == ".husky/_",
-                ".husky/_"
-                if configured_path == ".husky/_"
-                else "expected .husky/_; run pnpm prepare",
-            )
-        )
+        candidates = ("wl-copy", "xclip", "xsel", "clip.exe")
 
-    checks.extend(
-        (
-            husky_source_hook_check(root),
-            husky_generated_hook_check(root),
-            husky_launcher_check(root),
+    available = next((candidate for candidate in candidates if find_command(candidate)), None)
+    if available is None:
+        listed = ", ".join(candidates)
+        return Check(
+            "clipboard",
+            True,
+            f"optional integration unavailable; install one of {listed} for lc copy",
         )
-    )
-    return checks
+    return Check("clipboard", True, available)
+
+
+def _is_wsl(
+    *,
+    platform: str,
+    environ: Mapping[str, str],
+    proc_version: str | None,
+) -> bool:
+    if platform.startswith("win") or platform == "darwin":
+        return False
+    if environ.get("WSL_INTEROP") or environ.get("WSL_DISTRO_NAME"):
+        return True
+    return bool(proc_version and re.search(r"microsoft|wsl", proc_version, re.IGNORECASE))
+
+
+def wsl_repository_path_check(
+    root: Path,
+    *,
+    platform: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    proc_version: str | None = None,
+) -> Check:
+    """Warn when a WSL checkout lives on the mounted Windows filesystem."""
+    effective_platform = sys.platform if platform is None else platform
+    effective_environment = os.environ if environ is None else environ
+    if proc_version is None and effective_platform.startswith("linux"):
+        proc_version = read_text_file(Path("/proc/version"))
+    if not _is_wsl(
+        platform=effective_platform,
+        environ=effective_environment,
+        proc_version=proc_version,
+    ):
+        return Check("WSL repository path", True, "not running under WSL")
+
+    normalized_root = root.resolve().as_posix()
+    if WSL_MOUNT_PATTERN.match(normalized_root):
+        return Check(
+            "WSL repository path",
+            False,
+            f"{normalized_root} is on a Windows mount; move the checkout into the WSL filesystem",
+        )
+    return Check("WSL repository path", True, f"{normalized_root} is on the WSL filesystem")
 
 
 def collect_checks(
@@ -440,6 +525,9 @@ def collect_checks(
     *,
     find_command: CommandFinder = shutil.which,
     run: CommandRunner = run_command,
+    platform: str | None = None,
+    environ: Mapping[str, str] | None = None,
+    proc_version: str | None = None,
 ) -> list[Check]:
     """Collect all readiness checks without changing repository state."""
     checks: list[Check] = []
@@ -452,6 +540,16 @@ def collect_checks(
         )
         for command in REQUIRED_COMMANDS
     )
+    checks.append(mise_trust_check(root, available, run))
+    checks.append(
+        wsl_repository_path_check(
+            root,
+            platform=platform,
+            environ=environ,
+            proc_version=proc_version,
+        )
+    )
+    checks.append(clipboard_check(find_command, platform=platform))
 
     try:
         tools, package, project = read_metadata(root)
@@ -462,7 +560,7 @@ def collect_checks(
     checks.extend(metadata_checks(tools, package))
     checks.extend(version_checks(root, tools, package, available, run))
     checks.extend(dependency_checks(root, package, project))
-    checks.extend(husky_checks(root, available, run))
+    checks.extend(lefthook_checks(root, available, run))
     return checks
 
 
@@ -479,6 +577,9 @@ def format_report(checks: Sequence[Check]) -> str:
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the setup doctor for the optional repository root argument."""
     arguments = list(sys.argv[1:] if argv is None else argv)
+    if arguments in (["-h"], ["--help"]):
+        print("usage: doctor.py [root]")
+        return 0
     if len(arguments) > 1:
         print("usage: doctor.py [root]", file=sys.stderr)
         return 2

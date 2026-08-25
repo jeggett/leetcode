@@ -2,13 +2,13 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Vitest: Current Test File",
+      "name": "Vitest: Current Problem",
       "type": "node",
       "request": "launch",
       "runtimeExecutable": "mise",
       "runtimeArgs": ["exec", "--", "node"],
       "program": "${workspaceFolder}/node_modules/vitest/vitest.mjs",
-      "args": ["run", "${relativeFile}"],
+      "args": ["run", "${fileDirname}"],
       "cwd": "${workspaceFolder}",
       "console": "integratedTerminal",
       "autoAttachChildProcesses": true,
@@ -16,12 +16,12 @@
       "skipFiles": ["<node_internals>/**"]
     },
     {
-      "name": "Pytest: Current Test File",
+      "name": "Pytest: Current Problem",
       "type": "debugpy",
       "request": "launch",
       "module": "pytest",
-      "args": ["${relativeFile}"],
-      "cwd": "${workspaceFolder}",
+      "args": ["${fileDirname}"],
+      "cwd": "${fileDirname}",
       "console": "integratedTerminal",
       "justMyCode": true
     }

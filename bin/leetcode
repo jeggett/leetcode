@@ -1,0 +1,8 @@
+#!/usr/bin/env sh
+
+set -eu
+
+# Resolve the repository-local wrapper instead of looking up `lc` through
+# PATH, where an unrelated command with that name could win.
+BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+exec "$BIN_DIR/lc" "$@"

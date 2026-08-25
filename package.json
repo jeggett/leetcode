@@ -24,8 +24,9 @@
     "typecheck": "tsc --noEmit",
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
     "ready": "pnpm run incomplete && pnpm run check",
-    "doctor": "mise exec -- python scripts/doctor.py",
-    "prepare": "husky"
+    "ready:all": "pnpm run ready",
+    "doctor": "python scripts/doctor.py",
+    "prepare": "python scripts/install_hooks.py"
   },
   "repository": {
     "type": "git",
@@ -41,12 +42,12 @@
   },
   "homepage": "https://github.com/jeggett/leetcode#readme",
   "engines": {
-    "node": ">=22.13.0",
+    "node": ">=26.7.0",
     "pnpm": "11.20.0"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
-    "husky": "9.1.7",
+    "lefthook": "2.1.10",
     "typescript": "7.0.2",
     "vitest": "4.1.10"
   },

@@ -10,6 +10,8 @@ from scripts.submission import (
     clipboard_command,
     copy_to_clipboard,
     parse_arguments,
+    parse_options,
+    preflight_submission,
     read_submission,
     typescript_submission,
 )
@@ -27,6 +29,10 @@ def make_source(root: Path, language: str, contents: str) -> Path:
 def test_parses_submission_arguments() -> None:
     assert parse_arguments(["py", "1"]) == ("py", "1", False)
     assert parse_arguments(["ts", "92", "--copy"]) == ("ts", "92", True)
+    options = parse_options(["ts", "92", "--copy-only", "--no-check"])
+    assert options.copy is True
+    assert options.copy_only is True
+    assert options.check is False
 
 
 @pytest.mark.parametrize(
@@ -36,6 +42,7 @@ def test_parses_submission_arguments() -> None:
         (["go", "1"], "language"),
         (["py", "1", "--unknown"], "unknown option"),
         (["py", "1", "--copy", "--copy"], "only be provided once"),
+        (["py", "1", "--copy", "--copy-only"], "cannot be combined"),
     ],
 )
 def test_rejects_invalid_submission_arguments(arguments: list[str], message: str) -> None:
@@ -299,7 +306,56 @@ def test_main_prints_prepared_source_and_can_copy(
     copied: list[str] = []
     monkeypatch.setattr(submission, "copy_to_clipboard", copied.append)
 
-    assert submission.main(["ts", "1", "--copy"]) == 0
+    assert submission.main(["ts", "1", "--copy", "--no-check"]) == 0
 
     assert capsys.readouterr().out == " function solve(): number { return 1; }\n"
+    assert copied == [" function solve(): number { return 1; }\n"]
+
+
+def test_submission_preflight_requires_complete_scaffold_and_passing_focused_test(
+    tmp_path: Path,
+) -> None:
+    source = make_source(
+        tmp_path,
+        "py",
+        '"""solution"""\n# time: O(1), space: O(1)\nclass Solution:\n    pass\n',
+    )
+    test = source.with_name("test_p_0001_two_sum.py")
+    test.write_text("def test_solution():\n    assert True\n", encoding="utf-8")
+    calls: list[tuple[list[str], Path, bool]] = []
+
+    def passing_run(
+        command: list[str], *, cwd: Path, check: bool, capture_output: bool, text: bool
+    ) -> subprocess.CompletedProcess[str]:
+        assert capture_output is True
+        assert text is True
+        calls.append((command, cwd, check))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    preflight_submission(tmp_path, "py", "1", run=passing_run)
+
+    assert calls == [
+        (
+            ["pnpm", "test:py", "src/python/p_0001_two_sum/test_p_0001_two_sum.py"],
+            tmp_path,
+            False,
+        )
+    ]
+
+    source.write_text("# TODO: implement the solution\n", encoding="utf-8")
+    with pytest.raises(SubmissionError, match="submission is incomplete"):
+        preflight_submission(tmp_path, "py", "1", run=passing_run)
+
+
+def test_copy_only_prints_confirmation_without_dumping_source(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    make_source(tmp_path, "ts", "export function solve(): number { return 1; }\n")
+    monkeypatch.setattr(submission, "__file__", str(tmp_path / "scripts" / "submission.py"))
+    copied: list[str] = []
+    monkeypatch.setattr(submission, "copy_to_clipboard", copied.append)
+
+    assert submission.main(["ts", "1", "--copy-only", "--no-check"]) == 0
+
+    assert capsys.readouterr().out == "Copied ts 1 submission to the clipboard.\n"
     assert copied == [" function solve(): number { return 1; }\n"]

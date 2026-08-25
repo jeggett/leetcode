@@ -26,34 +26,34 @@
       "problemMatcher": []
     },
     {
-      "label": "Test TypeScript: Current Test File",
+      "label": "Test: Current Problem",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "lc", "test", "${relativeFile}"],
+      "args": ["exec", "--", "lc", "test"],
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${fileDirname}"
       },
       "group": "test",
       "problemMatcher": []
     },
     {
-      "label": "Test Python: Current Test File",
+      "label": "Test: Current File",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "lc", "test", "${relativeFile}"],
+      "args": ["exec", "--", "lc", "test", "${file}"],
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${fileDirname}"
       },
       "group": "test",
       "problemMatcher": []
     },
     {
-      "label": "Watch TypeScript: Current Test File",
+      "label": "Watch: Current TypeScript Problem",
       "type": "process",
       "command": "mise",
-      "args": ["exec", "--", "lc", "watch", "${relativeFile}"],
+      "args": ["exec", "--", "lc", "watch"],
       "options": {
-        "cwd": "${workspaceFolder}"
+        "cwd": "${fileDirname}"
       },
       "group": "test",
       "problemMatcher": []

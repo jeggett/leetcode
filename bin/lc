@@ -6,5 +6,58 @@ BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$BIN_DIR/.." && pwd -P)
 CALLER_DIRECTORY=$(pwd -P)
 
+# Help and diagnostics must remain available while mise.toml is untrusted or
+# the pinned tools have not been installed yet. Keep these branches before
+# every mise invocation; all normal project commands still use mise below.
+exec_direct_python() {
+    original_ifs=$IFS
+    IFS=:
+    for directory in $PATH; do
+        if [ -z "$directory" ]; then
+            directory=.
+        fi
+        for name in python python3; do
+            candidate=$directory/$name
+            if [ -x "$candidate" ] && \
+                "$candidate" -c 'import sys; raise SystemExit(sys.version_info < (3, 14))' \
+                    >/dev/null 2>&1; then
+                IFS=$original_ifs
+                LC_CALLER_CWD=$CALLER_DIRECTORY exec "$candidate" "$@"
+            fi
+        done
+    done
+    IFS=$original_ifs
+    echo "lc: Python 3.14 or newer is required; run ./bin/setup --trust" >&2
+    exit 127
+}
+
+for argument in "$@"; do
+    if [ "$argument" = "--" ]; then
+        break
+    fi
+    case "$argument" in
+        -h|--help)
+            exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+            ;;
+    esac
+done
+
+case "${1-}" in
+    ""|help)
+        exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+        ;;
+    doctor|d)
+        # Doctor is the bootstrap path: never let its diagnostics trigger mise's
+        # auto-install behavior. It only inspects the available commands and reports
+        # missing or mismatched project tools for setup to repair explicitly.
+        if command -v mise >/dev/null 2>&1 && \
+            MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- true >/dev/null 2>&1; then
+            exec env MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- \
+                python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+        fi
+        exec_direct_python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+        ;;
+esac
+
 LC_CALLER_CWD=$CALLER_DIRECTORY exec mise -C "$REPOSITORY_ROOT" exec -- \
     python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
