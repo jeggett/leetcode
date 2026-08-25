@@ -1847,9 +1847,9 @@ def _rewrite_typescript_retry_test(
 
     repository_root = problem.directory.parents[2]
     import_pattern = re.compile(
-        r"(?P<lead>^[ \t]*(?:(?:import|export)\s+[^;\n]*?\s+from\s+|import\s*))"
+        r"(?P<lead>^[ \t]*(?:(?:import|export)\s+(?:(?!;).)*?\s+from\s+|import\s*))"
         r"(?P<quote>[\"'])(?P<path>\.[^\"']+)(?P=quote)",
-        re.MULTILINE,
+        re.MULTILINE | re.DOTALL,
     )
     source_path = problem.source_path.resolve()
 
@@ -1883,7 +1883,7 @@ def _typescript_imported_bindings(problem: Problem) -> tuple[tuple[str, str], ..
     source_stem = problem.source_path.stem
     bindings: list[tuple[str, str]] = []
     imports = re.compile(
-        r"(?m)^[ \t]*import[ \t]+(?P<spec>[^;\n]+?)[ \t]+from[ \t]+"
+        r"(?ms)^[ \t]*import[ \t]+(?P<spec>(?:(?!;).)+?)[ \t]+from[ \t]+"
         r"[\"'](?P<path>[^\"']+)[\"']"
     )
     for imported in imports.finditer(test_source):
@@ -1974,7 +1974,7 @@ def _typescript_class_retry_source(
     for field_header in fields:
         rendered.append(f"    {field_header};")
     for method in methods:
-        method = re.sub(r"=\s*[A-Za-z_$][A-Za-z0-9_$]*(?=\s*[,\)])", "= undefined", method)
+        method = _typescript_sanitize_retry_defaults(method)
         rendered.append(f"    {method} {{")
         if method.startswith("constructor"):
             rendered.append("        // TODO: initialize the class state")
@@ -1993,6 +1993,16 @@ def _typescript_function_signatures(source: str) -> dict[str, str]:
     return dict(_typescript_function_declarations(source))
 
 
+def _typescript_sanitize_retry_defaults(signature: str) -> str:
+    """Replace defaults that can depend on declarations omitted from a retry."""
+
+    unsafe_default = re.compile(
+        r"=\s*(?![-+]?\d+(?:\.\d+)?\b|true\b|false\b|null\b|undefined\b|[\"'`])"
+        r"(?:[^,()]|\([^()]*\))*(?=\s*[,\)])"
+    )
+    return unsafe_default.sub("= undefined", signature)
+
+
 def _typescript_function_retry_source(signature: str) -> str:
     """Render one blank TypeScript function from a trusted declaration signature."""
 
@@ -2001,7 +2011,7 @@ def _typescript_function_retry_source(signature: str) -> str:
         signature = f"export function {signature}"
     if not signature.startswith("export ") and "export default" not in signature:
         signature = f"export {signature}"
-    signature = re.sub(r"=\s*[A-Za-z_$][A-Za-z0-9_$]*(?=\s*[,\)])", "= undefined", signature)
+    signature = _typescript_sanitize_retry_defaults(signature)
     return (
         "/* Blank interview retry artifact. The accepted solution is intentionally not copied. */\n"
         f"{signature} {{\n"
