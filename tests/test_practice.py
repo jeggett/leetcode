@@ -823,7 +823,7 @@ def test_retry_preserves_builtin_dataclass_default_factories(tmp_path: Path) -> 
     assert node.children == [1]
 
 
-def test_retry_drops_unresolved_dataclass_decorator_options(tmp_path: Path) -> None:
+def test_retry_rejects_unresolved_dataclass_decorator_options(tmp_path: Path) -> None:
     directory = make_problem(
         tmp_path,
         "py",
@@ -841,11 +841,8 @@ def test_retry_drops_unresolved_dataclass_decorator_options(tmp_path: Path) -> N
         "from p_0304_dataclass_option import Item\n", encoding="utf-8"
     )
 
-    source = retry(tmp_path, "0304", "py").path.read_text(encoding="utf-8")
-    namespace: dict[str, object] = {}
-    exec(source, namespace)
-
-    assert "ENABLE_ORDER" not in source
+    with pytest.raises(PracticeError, match="state-dependent dataclass options"):
+        retry(tmp_path, "0304", "py")
 
 
 def test_retry_preserves_python_property_setter_and_deleter(tmp_path: Path) -> None:

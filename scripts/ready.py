@@ -276,6 +276,10 @@ def changed_paths(root: Path, *, git_run: GitRunner = run_git) -> list[str]:
             if committed.returncode != 0:
                 raise _git_error(committed, "could not inspect committed branch diff")
             branch_paths.update(committed.stdout.splitlines())
+        else:
+            branch_paths.add("scripts/ready.py")
+    else:
+        branch_paths.add("scripts/ready.py")
     untracked = git_run(("git", "ls-files", "--others", "--exclude-standard"), root)
     if untracked.returncode != 0:
         raise ReadyError(

@@ -1199,14 +1199,14 @@ def _configured_base_branch(root: Path, value: str | None = None) -> str:
         except OSError:
             value = None
     branch = (value or os.environ.get("LC_BASE_BRANCH") or DEFAULT_BASE_BRANCH).strip()
-    if (
-        not branch
-        or branch.startswith("-")
-        or any(character.isspace() for character in branch)
-        or any(token in branch for token in ("..", "~", "^", ":", "?", "*", "[", "\\"))
-        or branch.endswith(("/", ".", ".lock"))
-        or "//" in branch
-    ):
+    valid_branch = subprocess.run(
+        ["git", "check-ref-format", "--branch", branch],
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if valid_branch.returncode != 0:
         raise LcUsageError("base branch must be a non-empty Git branch name")
     return branch
 
@@ -2101,6 +2101,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except LeetError as error:
         print(f"error: {error}", file=sys.stderr)
         return 2 if str(error).startswith("usage:") else 1
+    except PracticeError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
     except KeyboardInterrupt:
         return 130
     except OSError as error:

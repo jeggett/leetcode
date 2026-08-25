@@ -78,6 +78,7 @@ LANGUAGE_ALIASES = {
 VALID_MODES = frozenset({"new", "review", "mock"})
 VALID_RESULTS = frozenset({"solved", "hinted", "failed"})
 VALID_FILTERS = frozenset({"all", "due", "unseen", "scheduled"})
+VALID_METADATA_KINDS = frozenset({"class", "design", "function", "language-drill"})
 
 # Index confidence - 1 is the first item.  Kept public so callers can explain a due date.
 SCHEDULE_DAYS: dict[str, tuple[int, int, int, int]] = {
@@ -300,6 +301,8 @@ def _parse_metadata(payload: Mapping[str, Any], source_path: Path | None = None)
     signature = _optional_text(values.get("signature"), "signature")
     notes = _optional_text(values.get("notes"), "notes")
     kind = _optional_text(values.get("kind"), "kind")
+    if kind is not None and kind not in VALID_METADATA_KINDS:
+        raise MetadataError("kind must be class, design, function, or language-drill")
     raw_tags = values.get("tags", values.get("topics", ()))
     if isinstance(raw_tags, str):
         raw_tags = (raw_tags,)
@@ -1955,7 +1958,15 @@ def _typescript_position_is_code(source: str, position: int) -> bool:
             closing = source.find("*/", index + 2)
             index = len(source) if closing == -1 else closing + 2
             continue
-        if source[index] in {"'", '"', "`"}:
+        if source[index] == "`":
+            closing = _typescript_quoted_end(source, index)
+            if position < closing:
+                prefix = source[index:position]
+                if prefix.count("${") > prefix.count("}"):
+                    return True
+            index = closing
+            continue
+        if source[index] in {"'", '"'}:
             index = _typescript_quoted_end(source, index)
             continue
         index += 1
@@ -2099,8 +2110,16 @@ def _typescript_sanitize_retry_defaults(signature: str) -> str:
         r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|`(?:\\.|(?!\$\{)[^`\\])*`)\s*'
     )
     replacements: list[tuple[int, int]] = []
-    index = 0
-    while index < len(signature):
+    parameter_opening = signature.find("(")
+    parameter_closing = (
+        _typescript_matching_delimiter(signature, parameter_opening, "(", ")")
+        if parameter_opening >= 0
+        else None
+    )
+    if parameter_closing is None:
+        return signature
+    index = parameter_opening + 1
+    while index < parameter_closing:
         if signature[index] != "=" or (index + 1 < len(signature) and signature[index + 1] == ">"):
             index += 1
             continue
@@ -2223,6 +2242,14 @@ def _typescript_retry_exports(
     if "*" in requested_names:
         requested_names = [*functions, *classes, *declarations]
     requested_classes = [name for name in requested_names if name in classes]
+    inherited_classes = [
+        name for name in requested_classes if re.search(r"\bextends\b", classes[name]["header"])
+    ]
+    if inherited_classes:
+        raise PracticeError(
+            "retry cannot safely recreate inherited TypeScript class interface(s) "
+            + ", ".join(inherited_classes)
+        )
     stateful_helper = any(
         _typescript_class_has_initialized_field(source, classes[name])
         or _typescript_class_has_constructor_state(source, classes[name])
@@ -2381,8 +2408,13 @@ def _python_dataclass_decorator(class_node: ast.ClassDef) -> str | None:
             continue
         if not isinstance(decorator, ast.Call):
             return "dataclass"
-        if any(not _python_self_contained_default(argument) for argument in decorator.args):
-            return "dataclass"
+        if any(not _python_self_contained_default(argument) for argument in decorator.args) or any(
+            keyword.arg is None or not _python_self_contained_default(keyword.value)
+            for keyword in decorator.keywords
+        ):
+            raise PracticeError(
+                f"retry cannot safely recreate state-dependent dataclass options for {class_node.name}"
+            )
         arguments = [ast.unparse(argument) for argument in decorator.args]
         arguments.extend(
             f"{keyword.arg}={ast.unparse(keyword.value)}"
