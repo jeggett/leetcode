@@ -297,6 +297,8 @@ def _parse_metadata(payload: Mapping[str, Any], source_path: Path | None = None)
     difficulty = _optional_text(values.get("difficulty"), "difficulty")
     if difficulty is not None:
         difficulty = difficulty.lower()
+        if difficulty not in {"easy", "medium", "hard"}:
+            raise MetadataError("difficulty must be easy, medium, or hard")
     target_minutes = _positive_int(values.get("target_minutes"), "target_minutes")
     signature = _optional_text(values.get("signature"), "signature")
     notes = _optional_text(values.get("notes"), "notes")
@@ -1687,6 +1689,10 @@ def _typescript_referenced_type_declarations(source: str, rendered: str) -> list
                 raise PracticeError(
                     f"retry cannot safely recreate enum {name} with runtime dependencies"
                 )
+            if re.search(r"\btypeof\s+[A-Za-z_$][A-Za-z0-9_$]*", declaration):
+                raise PracticeError(
+                    f"retry cannot safely recreate type {name} with value dependencies"
+                )
             selected.add(name)
             identifiers.update(re.findall(r"\b[A-Za-z_$][A-Za-z0-9_$]*\b", declaration))
             changed = True
@@ -2259,6 +2265,18 @@ def _typescript_retry_exports(
         raise PracticeError(
             "retry cannot safely recreate imported TypeScript helper classes with constructor state"
         )
+    behavioral_helpers = []
+    if len(requested_names) > 1:
+        for name in requested_classes:
+            opening = source.find("{", classes[name].start(), classes[name].end())
+            closing = _typescript_matching_brace(source, opening) if opening >= 0 else None
+            if closing is not None and _typescript_class_methods(source, opening, closing):
+                behavioral_helpers.append(name)
+    if behavioral_helpers:
+        raise PracticeError(
+            "retry cannot safely recreate behavioral TypeScript helper class(es) "
+            + ", ".join(behavioral_helpers)
+        )
 
     rendered: list[str] = []
     for name in dict.fromkeys(requested_names):
@@ -2475,7 +2493,10 @@ def _python_class_retry_source(
         node
         for node in class_node.body
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and (node.name == "__init__" or not node.name.startswith("_"))
+        and (
+            node.name in {"__init__", "__call__", "__iter__", "__len__", "__getitem__"}
+            or not node.name.startswith("_")
+        )
     ]
     if not dataclass_fields and not methods:
         rendered.append("    pass")
@@ -2542,7 +2563,7 @@ def _python_imported_class_names(problem: Problem) -> tuple[str, ...]:
         return ()
     source_stem = problem.source_path.stem
     names: list[str] = []
-    for node in test_module.body:
+    for node in ast.walk(test_module):
         if isinstance(node, ast.ImportFrom) and node.module:
             if node.module.rsplit(".", 1)[-1] == source_stem:
                 names.extend(alias.name for alias in node.names if alias.name != "*")

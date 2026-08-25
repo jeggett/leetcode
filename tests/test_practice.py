@@ -1462,3 +1462,70 @@ def test_retry_rejects_dynamic_solution_imports(tmp_path: Path) -> None:
     )
     with pytest.raises(PracticeError, match="dynamic solution import"):
         retry(tmp_path, "0908")
+
+
+def test_retry_discovers_nested_python_solution_imports(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0909",
+        "nested",
+        source="class Codec:\n    pass\nclass TreeNode:\n    pass\n",
+    )
+    (directory / "test_p_0909_nested.py").write_text(
+        "def test_codec():\n    from p_0909_nested import Codec, TreeNode\n    assert Codec and TreeNode\n",
+        encoding="utf-8",
+    )
+    source = retry(tmp_path, "0909", "py").path.read_text(encoding="utf-8")
+    assert "class Codec:" in source and "class TreeNode:" in source
+
+
+def test_retry_preserves_python_protocol_methods(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0910",
+        "callable",
+        source="class Callable:\n    def __call__(self, value: int) -> int:\n        return value\n",
+    )
+    (directory / "test_p_0910_callable.py").write_text(
+        "from p_0910_callable import Callable\n", encoding="utf-8"
+    )
+    assert "def __call__" in retry(tmp_path, "0910", "py").path.read_text(encoding="utf-8")
+
+
+def test_retry_rejects_behavioral_typescript_helpers(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0911",
+        "behavior",
+        source="export class Node { value(): number { return 1; } }\nexport function solve(): number { return 1; }\n",
+    )
+    (directory / "p_0911_behavior.test.ts").write_text(
+        'import { Node, solve } from "./p_0911_behavior.js";\n', encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="behavioral TypeScript helper"):
+        retry(tmp_path, "0911")
+
+
+def test_metadata_rejects_unknown_difficulty(tmp_path: Path) -> None:
+    path = tmp_path / "problem.toml"
+    path.write_text('difficulty = "medum"\n', encoding="utf-8")
+    with pytest.raises(MetadataError, match="difficulty"):
+        load_problem_metadata(path)
+
+
+def test_retry_rejects_typeof_value_dependencies(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "ts",
+        "0912",
+        "typeof",
+        source="const CONFIG = {};\ntype Options = typeof CONFIG;\nexport function solve(value: Options): Options { return value; }\n",
+    )
+    (directory / "p_0912_typeof.test.ts").write_text(
+        'import { solve } from "./p_0912_typeof.js";\n', encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="value dependencies"):
+        retry(tmp_path, "0912")

@@ -587,7 +587,8 @@ def fetch_problem_metadata(
     kind = "function"
     if signature is None:
         is_design_class = (
-            re.search(r"(?m)^[ \t]*class[ \t]+", snippet) is not None
+            re.search(r"(?m)^[ \t]*(?:export[ \t]+)?class[ \t]+", snippet) is not None
+            and re.search(r"\bfunction[ \t*]+[A-Za-z_$]", snippet) is None
             if language == "ts"
             else PYTHON_SOLUTION_CLASS.search(snippet) is None
         )
