@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from scripts import doctor
 from scripts.doctor import CommandResult, collect_checks, format_report, main, parse_version
 
 
@@ -23,7 +22,7 @@ def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None
                 "engines": {"node": ">=22.13.0", "pnpm": "11.20.0"},
                 "devDependencies": {
                     "@biomejs/biome": "2.5.7",
-                    "husky": "9.1.7",
+                    "lefthook": "2.1.10",
                     "typescript": "5.7.3",
                     "vitest": "4.1.10",
                 },
@@ -47,7 +46,7 @@ def write_dependencies(
 ) -> None:
     node_versions = {
         "@biomejs/biome": "2.5.7",
-        "husky": "9.1.7",
+        "lefthook": "2.1.10",
         "typescript": "5.7.3",
         "vitest": node_version,
     }
@@ -75,36 +74,17 @@ def write_dependencies(
         )
 
 
-def write_husky_installation(root: Path) -> None:
-    source_hook = root / ".husky" / "pre-commit"
-    source_hook.parent.mkdir(parents=True)
-    source_hook.write_text(
-        "if ! git diff --quiet -- scripts .husky/pre-commit; then\n"
-        '    echo "Unstaged tooling edits make the staged quality gate unsafe; stage or discard them." >&2\n'
-        "    exit 1\n"
-        "fi\n\n"
-        "mise exec -- uv run python scripts/ready.py staged\n",
+def write_lefthook_installation(root: Path) -> None:
+    (root / "lefthook.yml").write_text(
+        "pre-commit:\n  commands:\n    staged-ready:\n"
+        "      run: mise exec -- uv run python scripts/ready.py staged\n",
         encoding="utf-8",
     )
-
-    husky_directory = root / ".husky" / "_"
-    husky_directory.mkdir(parents=True)
-    generated_hook = husky_directory / "pre-commit"
-    generated_hook.write_text(
-        '#!/usr/bin/env sh\n. "$(dirname "$0")/h"\n',
-        encoding="utf-8",
-    )
-    launcher = husky_directory / "h"
-    launcher.write_text(
-        "#!/usr/bin/env sh\n"
-        'n=$(basename "$0")\n'
-        's=$(dirname "$(dirname "$0")")/$n\n'
-        'sh -e "$s" "$@"\n',
-        encoding="utf-8",
-    )
+    generated_hook = root / ".git" / "hooks" / "pre-commit"
+    generated_hook.parent.mkdir(parents=True)
+    generated_hook.write_text('#!/bin/sh\nlefthook run pre-commit -- "$@"\n', encoding="utf-8")
     if os.name == "posix":
         generated_hook.chmod(0o755)
-        launcher.chmod(0o755)
 
 
 def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResult:
@@ -114,7 +94,7 @@ def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResu
         ("pnpm", "--version"): "11.20.0\n",
         ("python", "--version"): "Python 3.14.7\n",
         ("uv", "--version"): "uv 0.12.2\n",
-        ("git", "config", "--get", "core.hooksPath"): ".husky/_\n",
+        ("git", "config", "--get", "core.hooksPath"): "",
     }
     return CommandResult(0, outputs[tuple(command)])
 
@@ -128,7 +108,7 @@ def test_parse_version_accepts_common_version_command_output() -> None:
 def test_collect_checks_reports_a_ready_checkout(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     write_dependencies(tmp_path)
-    write_husky_installation(tmp_path)
+    write_lefthook_installation(tmp_path)
 
     checks = collect_checks(
         tmp_path,
@@ -189,32 +169,11 @@ def test_collect_checks_requires_project_local_tool_pins(tmp_path: Path) -> None
     assert "must pin project tools: node, pnpm" in metadata.detail
 
 
-def test_collect_checks_requires_the_husky_hook_path(tmp_path: Path) -> None:
-    write_metadata(tmp_path)
-    write_dependencies(tmp_path)
-    write_husky_installation(tmp_path)
-
-    def wrong_hook_runner(command: tuple[str, ...] | list[str], cwd: Path) -> CommandResult:
-        if tuple(command) == ("git", "config", "--get", "core.hooksPath"):
-            return CommandResult(0, ".husky\n")
-        return command_runner(command, cwd)
-
-    checks = collect_checks(
-        tmp_path,
-        find_command=lambda _: "/usr/bin/tool",
-        run=wrong_hook_runner,
-    )
-    hook = next(check for check in checks if check.name == "git core.hooksPath")
-
-    assert not hook.passed
-    assert "pnpm prepare" in hook.detail
-
-
 def test_collect_checks_rejects_empty_dependency_directories(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     (tmp_path / "node_modules").mkdir()
     (tmp_path / ".venv").mkdir()
-    write_husky_installation(tmp_path)
+    write_lefthook_installation(tmp_path)
 
     checks = collect_checks(
         tmp_path,
@@ -230,7 +189,7 @@ def test_collect_checks_rejects_empty_dependency_directories(tmp_path: Path) -> 
 def test_collect_checks_rejects_stale_dependency_versions(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     write_dependencies(tmp_path, node_version="4.0.0", python_version="9.0.0")
-    write_husky_installation(tmp_path)
+    write_lefthook_installation(tmp_path)
 
     checks = collect_checks(
         tmp_path,
@@ -243,126 +202,35 @@ def test_collect_checks_rejects_stale_dependency_versions(tmp_path: Path) -> Non
     assert results[".venv (pytest)"].detail.startswith("expected 9.1.1, found 9.0.0")
 
 
-@pytest.mark.parametrize(
-    ("missing_path", "check_name", "remedy"),
-    [
-        (
-            Path(".husky/pre-commit"),
-            "Husky source pre-commit hook",
-            "restore .husky/pre-commit",
-        ),
-        (Path(".husky/_/pre-commit"), "Husky generated pre-commit hook", "pnpm prepare"),
-        (Path(".husky/_/h"), "Husky launcher", "pnpm prepare"),
-    ],
-)
-def test_collect_checks_requires_husky_hook_files(
-    tmp_path: Path, missing_path: Path, check_name: str, remedy: str
-) -> None:
+def test_collect_checks_requires_lefthook_config(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     write_dependencies(tmp_path)
-    write_husky_installation(tmp_path)
-    (tmp_path / missing_path).unlink()
-
-    checks = collect_checks(
-        tmp_path,
-        find_command=lambda _: "/usr/bin/tool",
-        run=command_runner,
-    )
-    result = next(check for check in checks if check.name == check_name)
-
+    write_lefthook_installation(tmp_path)
+    (tmp_path / "lefthook.yml").unlink()
+    checks = collect_checks(tmp_path, find_command=lambda _: "/usr/bin/tool", run=command_runner)
+    result = next(check for check in checks if check.name == "Lefthook pre-commit config")
     assert not result.passed
-    assert remedy in result.detail
 
 
-@pytest.mark.parametrize(
-    ("path", "contents", "check_name"),
-    [
-        (
-            Path(".husky/_/pre-commit"),
-            "#!/usr/bin/env sh\nexit 0\n",
-            "Husky generated pre-commit hook",
-        ),
-        (Path(".husky/_/h"), "#!/usr/bin/env sh\nexit 0\n", "Husky launcher"),
-    ],
-)
-def test_collect_checks_rejects_inert_husky_generated_files(
-    tmp_path: Path, path: Path, contents: str, check_name: str
-) -> None:
+def test_collect_checks_rejects_inert_lefthook_config(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     write_dependencies(tmp_path)
-    write_husky_installation(tmp_path)
-    target = tmp_path / path
-    target.write_text(contents, encoding="utf-8")
-    if os.name == "posix":
-        target.chmod(0o755)
+    write_lefthook_installation(tmp_path)
+    (tmp_path / "lefthook.yml").write_text("pre-commit: {}\n", encoding="utf-8")
+    checks = collect_checks(tmp_path, find_command=lambda _: "/usr/bin/tool", run=command_runner)
+    result = next(check for check in checks if check.name == "Lefthook pre-commit config")
+    assert not result.passed
 
-    checks = collect_checks(
-        tmp_path,
-        find_command=lambda _: "/usr/bin/tool",
-        run=command_runner,
-    )
-    result = next(check for check in checks if check.name == check_name)
 
+def test_collect_checks_requires_generated_lefthook_hook(tmp_path: Path) -> None:
+    write_metadata(tmp_path)
+    write_dependencies(tmp_path)
+    write_lefthook_installation(tmp_path)
+    (tmp_path / ".git/hooks/pre-commit").unlink()
+    checks = collect_checks(tmp_path, find_command=lambda _: "/usr/bin/tool", run=command_runner)
+    result = next(check for check in checks if check.name == "Lefthook generated pre-commit hook")
     assert not result.passed
     assert "pnpm prepare" in result.detail
-
-
-@pytest.mark.parametrize(
-    "contents",
-    [
-        "exit 0\n",
-        "exit 0\nmise exec -- pnpm ready:changed\n",
-    ],
-)
-def test_collect_checks_rejects_inert_husky_source_hook(tmp_path: Path, contents: str) -> None:
-    write_metadata(tmp_path)
-    write_dependencies(tmp_path)
-    write_husky_installation(tmp_path)
-    (tmp_path / ".husky" / "pre-commit").write_text(contents, encoding="utf-8")
-
-    checks = collect_checks(
-        tmp_path,
-        find_command=lambda _: "/usr/bin/tool",
-        run=command_runner,
-    )
-    result = next(check for check in checks if check.name == "Husky source pre-commit hook")
-
-    assert not result.passed
-    assert "mise exec -- uv run python scripts/ready.py staged" in result.detail
-
-
-@pytest.mark.skipif(os.name != "posix", reason="POSIX executable bits are unavailable")
-@pytest.mark.parametrize(
-    ("path", "check_name"),
-    [
-        (Path(".husky/_/pre-commit"), "Husky generated pre-commit hook"),
-    ],
-)
-def test_collect_checks_requires_executable_generated_husky_files(
-    tmp_path: Path,
-    path: Path,
-    check_name: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    write_metadata(tmp_path)
-    write_dependencies(tmp_path)
-    write_husky_installation(tmp_path)
-    target = tmp_path / path
-    monkeypatch.setattr(
-        doctor.os,
-        "access",
-        lambda candidate, mode: Path(candidate) != target or mode != os.X_OK,
-    )
-
-    checks = collect_checks(
-        tmp_path,
-        find_command=lambda _: "/usr/bin/tool",
-        run=command_runner,
-    )
-    result = next(check for check in checks if check.name == check_name)
-
-    assert not result.passed
-    assert "not executable" in result.detail
 
 
 def test_main_returns_nonzero_when_setup_is_incomplete(

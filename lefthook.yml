@@ -1,0 +1,4 @@
+pre-commit:
+  commands:
+    staged-ready:
+      run: mise exec -- uv run python scripts/ready.py staged

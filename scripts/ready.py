@@ -361,12 +361,13 @@ def changed_problem_keys(paths: Sequence[str]) -> tuple[list[tuple[str, str]], b
     """Return changed problem IDs and whether repository tooling also changed."""
     keys: set[tuple[str, str]] = set()
     requires_full = False
-    code_prefixes = ("bin/", "scripts/", "tests/", ".github/", ".husky/", ".vscode/")
+    code_prefixes = ("bin/", "scripts/", "tests/", ".github/", ".vscode/")
     code_files = {
         "package.json",
         "pnpm-lock.yaml",
         "pyproject.toml",
         "uv.lock",
+        "lefthook.yml",
         "lc.toml",
         ".node-version",
         ".python-version",
@@ -494,6 +495,7 @@ def run_full_gate(root: Path, *, run: Runner = subprocess.run, no_sync: bool = F
     kwargs: dict[str, object] = {"cwd": root, "check": False}
     if no_sync:
         environment = dict(environ)
+        environment["CI"] = "true"
         environment["UV_NO_SYNC"] = "1"
         kwargs["env"] = environment
     result = run(["pnpm", "run", "ready:all"], **kwargs)

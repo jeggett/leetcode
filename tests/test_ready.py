@@ -433,9 +433,9 @@ def test_staged_gate_rejects_deleted_required_source(tmp_path: Path) -> None:
         run_staged_gate(tmp_path, run=lambda *_args, **_kwargs: None)
 
 
-def test_pre_commit_hook_uses_staged_mode() -> None:
-    hook = Path(__file__).resolve().parents[1] / ".husky/pre-commit"
+def test_lefthook_pre_commit_uses_staged_mode() -> None:
+    hook = Path(__file__).resolve().parents[1] / "lefthook.yml"
 
     contents = hook.read_text(encoding="utf-8")
-    assert "git diff --quiet -- scripts .husky/pre-commit" in contents
+    assert "pre-commit:" in contents
     assert "scripts/ready.py staged" in contents

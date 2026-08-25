@@ -14,7 +14,7 @@ Install the pinned toolchain and frozen dependencies from the repository root:
 
 `--trust` explicitly trusts this repository's `mise.toml`. After the first run, `./bin/setup` is
 safe to repeat. The setup script installs the pinned tools, runs `pnpm install --frozen-lockfile`,
-syncs the frozen Python environment, and installs the Husky hook.
+syncs the frozen Python environment, and installs the Lefthook hook.
 
 The repository-local `lc` is added to `PATH` by `mise`. If another system command owns the name
 `lc`, use the unambiguous wrapper instead:
@@ -194,7 +194,7 @@ detection.
 
 ## Troubleshooting
 
-- Run `lc doctor` first. It reports missing runtimes, dependency metadata, Husky installation,
+- Run `lc doctor` first. It reports missing runtimes, dependency metadata, Lefthook installation,
   WSL placement, and clipboard support without attempting repairs.
 - If setup has not completed or `mise.toml` is untrusted, run `./bin/setup --trust` and retry.
 - If `lc` resolves to an unrelated system command, use `./bin/leetcode ...`; it always invokes

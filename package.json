@@ -33,7 +33,7 @@
     "ready:changed": "uv run python scripts/ready.py changed",
     "practice": "uv run python scripts/practice.py",
     "doctor": "python scripts/doctor.py",
-    "prepare": "husky"
+    "prepare": "python scripts/install_hooks.py"
   },
   "repository": {
     "type": "git",
@@ -54,7 +54,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.7",
-    "husky": "9.1.7",
+    "lefthook": "2.1.10",
     "typescript": "5.7.3",
     "vitest": "4.1.10"
   },

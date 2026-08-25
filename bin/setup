@@ -53,7 +53,7 @@ if [ "$ACTIVE_PYTHON" != "Python $EXPECTED_PYTHON" ]; then
     fi
 fi
 
-# Every remaining operation is safe to repeat: frozen dependency syncs and Husky's prepare hook
+# Every remaining operation is safe to repeat: frozen dependency syncs and Lefthook's prepare hook
 # converge on the same project state.
 mise -C "$REPOSITORY_ROOT" exec -- pnpm install --frozen-lockfile
 mise -C "$REPOSITORY_ROOT" exec -- uv sync --frozen
