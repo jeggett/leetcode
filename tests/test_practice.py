@@ -1509,6 +1509,37 @@ def test_retry_rejects_behavioral_typescript_helpers(tmp_path: Path) -> None:
         retry(tmp_path, "0911")
 
 
+def test_retry_rejects_behavioral_python_helpers(tmp_path: Path) -> None:
+    directory = make_problem(
+        tmp_path,
+        "py",
+        "0913",
+        "behavior",
+        source=(
+            "class Node:\n    def value(self) -> int:\n        return 1\n\n"
+            "class Solution:\n    def solve(self) -> int:\n        return 1\n"
+        ),
+    )
+    (directory / "test_p_0913_behavior.py").write_text(
+        "from p_0913_behavior import Node, Solution\n", encoding="utf-8"
+    )
+    with pytest.raises(PracticeError, match="behavioral Python helper"):
+        retry(tmp_path, "0913", "py")
+
+
+def test_retry_rejects_relative_python_helpers_outside_problem(tmp_path: Path) -> None:
+    package = tmp_path / "src" / "python"
+    package.mkdir(parents=True, exist_ok=True)
+    (package / "helpers.py").write_text("class Node:\n    pass\n", encoding="utf-8")
+    directory = make_problem(tmp_path, "py", "0914", "relative_helper")
+    (directory / "test_p_0914_relative_helper.py").write_text(
+        "from ..helpers import Node\nfrom p_0914_relative_helper import Solution\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(PracticeError, match="outside the problem directory"):
+        retry(tmp_path, "0914", "py")
+
+
 def test_metadata_rejects_unknown_difficulty(tmp_path: Path) -> None:
     path = tmp_path / "problem.toml"
     path.write_text('difficulty = "medum"\n', encoding="utf-8")

@@ -2678,6 +2678,23 @@ def _python_retry_source(problem: Problem) -> str:
     imported_classes = (
         [available_classes[name] for name in imported_class_names] if available_classes else []
     )
+    retry_target = next(
+        (class_node for class_node in imported_classes if class_node.name == "Solution"), None
+    ) or (max(imported_classes, key=_python_class_interface_score) if imported_classes else None)
+    behavioral_helpers = [
+        class_node.name
+        for class_node in imported_classes
+        if class_node is not retry_target
+        and any(
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name != "__init__"
+            for node in class_node.body
+        )
+    ]
+    if behavioral_helpers:
+        raise PracticeError(
+            "retry cannot safely stub behavioral Python helper class(es) "
+            + ", ".join(behavioral_helpers)
+        )
     inherited_classes = [class_node.name for class_node in imported_classes if class_node.bases]
     if inherited_classes:
         raise PracticeError(
@@ -2838,7 +2855,10 @@ def _validate_python_retry_test_dependencies(
             try:
                 target.relative_to(problem.directory.resolve())
             except ValueError:
-                continue
+                raise PracticeError(
+                    f"retry cannot safely copy {original_test.name}: relative Python import "
+                    f"{module_name} resolves outside the problem directory"
+                ) from None
             dependencies.add(target)
     if dependencies:
         names = ", ".join(str(path.relative_to(problem.directory)) for path in sorted(dependencies))
