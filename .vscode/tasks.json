@@ -59,17 +59,6 @@
       "problemMatcher": []
     },
     {
-      "label": "Watch: Current Python Problem",
-      "type": "process",
-      "command": "mise",
-      "args": ["exec", "--", "lc", "watch"],
-      "options": {
-        "cwd": "${fileDirname}"
-      },
-      "group": "test",
-      "problemMatcher": []
-    },
-    {
       "label": "New LeetCode Problem from URL",
       "type": "process",
       "command": "mise",
@@ -77,7 +66,6 @@
         "exec",
         "--",
         "lc",
-        "start",
         "${input:problemLanguage}",
         "${input:problemUrl}"
       ],

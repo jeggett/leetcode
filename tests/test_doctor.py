@@ -222,6 +222,35 @@ def test_collect_checks_rejects_inert_lefthook_config(tmp_path: Path) -> None:
     assert not result.passed
 
 
+def test_collect_checks_rejects_commented_lefthook_config(tmp_path: Path) -> None:
+    write_metadata(tmp_path)
+    write_dependencies(tmp_path)
+    write_lefthook_installation(tmp_path)
+    (tmp_path / "lefthook.yml").write_text(
+        "# pre-commit:\n#   run: mise exec -- pnpm ready\n", encoding="utf-8"
+    )
+    checks = collect_checks(tmp_path, find_command=lambda _: "/usr/bin/tool", run=command_runner)
+    result = next(check for check in checks if check.name == "Lefthook pre-commit config")
+    assert not result.passed
+
+
+def test_collect_checks_treats_missing_clipboard_as_advisory(tmp_path: Path) -> None:
+    write_metadata(tmp_path)
+    write_dependencies(tmp_path)
+    write_lefthook_installation(tmp_path)
+    checks = collect_checks(
+        tmp_path,
+        find_command=lambda command: (
+            None if command in {"wl-copy", "xclip", "xsel", "clip.exe"} else "/usr/bin/tool"
+        ),
+        run=command_runner,
+        platform="linux",
+    )
+    result = next(check for check in checks if check.name == "clipboard")
+    assert result.passed
+    assert "optional" in result.detail
+
+
 def test_collect_checks_requires_generated_lefthook_hook(tmp_path: Path) -> None:
     write_metadata(tmp_path)
     write_dependencies(tmp_path)

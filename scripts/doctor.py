@@ -410,7 +410,18 @@ def lefthook_config_check(root: Path) -> Check:
     contents = read_text_file(root / LEFTHOOK_CONFIG)
     if contents is None:
         return Check("Lefthook pre-commit config", False, "missing; restore lefthook.yml")
-    if "pre-commit:" not in contents or LEFTHOOK_COMMAND not in contents:
+    lines = contents.splitlines()
+    try:
+        start = next(index for index, line in enumerate(lines) if line.strip() == "pre-commit:")
+    except StopIteration:
+        return Check("Lefthook pre-commit config", False, f"must run {LEFTHOOK_COMMAND}")
+    block: list[str] = []
+    for line in lines[start + 1 :]:
+        if line and not line[0].isspace() and not line.lstrip().startswith("#"):
+            break
+        block.append(line)
+    active_run = re.compile(rf"\s+run:\s*['\"]?{re.escape(LEFTHOOK_COMMAND)}['\"]?\s*(?:#.*)?")
+    if not any(active_run.fullmatch(line) for line in block):
         return Check("Lefthook pre-commit config", False, f"must run {LEFTHOOK_COMMAND}")
     return Check("Lefthook pre-commit config", True, f"runs {LEFTHOOK_COMMAND}")
 
@@ -461,8 +472,8 @@ def clipboard_check(
         listed = ", ".join(candidates)
         return Check(
             "clipboard",
-            False,
-            f"no supported clipboard command found; install one of {listed}",
+            True,
+            f"optional integration unavailable; install one of {listed} for lc copy",
         )
     return Check("clipboard", True, available)
 
