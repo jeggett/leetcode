@@ -1,6 +1,7 @@
 # Repository Guide
 
-Global working agreements: `~/.codex/AGENTS.md`. This file contains project-specific guidance.
+Optional personal working agreements: `~/.codex/AGENTS.md`, if present. This tracked guide
+is self-contained; no external instruction file is required.
 
 ## Layout
 
