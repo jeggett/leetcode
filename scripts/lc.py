@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import difflib
 import json
 import os
 import re
@@ -19,24 +20,36 @@ from urllib.request import Request, urlopen
 try:
     from scripts.new_problem import (
         ScaffoldError,
-        build_paths,
         create_problem,
         matching_problem_directories,
         normalize_problem_id,
         slugify,
-        suggested_branch,
         validate_signature,
+    )
+    from scripts.examples import Example, extract_examples, render_example_tests
+    from scripts.lc_state import StateError, read_state, write_state
+    from scripts.problem_paths import (
+        ProblemPathError,
+        require_source_path,
+        require_test_path,
+        resolve_problem_paths,
     )
 except ModuleNotFoundError:
     from new_problem import (  # type: ignore[no-redef]
         ScaffoldError,
-        build_paths,
         create_problem,
         matching_problem_directories,
         normalize_problem_id,
         slugify,
-        suggested_branch,
         validate_signature,
+    )
+    from examples import Example, extract_examples, render_example_tests
+    from lc_state import StateError, read_state, write_state
+    from problem_paths import (
+        ProblemPathError,
+        require_source_path,
+        require_test_path,
+        resolve_problem_paths,
     )
 
 
@@ -45,9 +58,13 @@ GRAPHQL_QUERY = """
 query questionData($titleSlug: String!) {
   question(titleSlug: $titleSlug) {
     questionFrontendId
+    questionId
     title
     titleSlug
     isPaidOnly
+    content
+    exampleTestcases
+    metaData
     codeSnippets {
       langSlug
       code
@@ -61,32 +78,43 @@ USAGE = "usage: lc [command] [arguments]"
 HELP = """\
 lc — the local LeetCode workflow
 
-Create:
-  lc URL                         create a TypeScript problem and branch
-  lc py URL                      create a Python problem and branch
-  lc new [ts|py] ID TITLE...     create a manual scaffold (TypeScript by default)
+Start → solve → lc done. Run lc in a terminal for the guided menu.
 
-Solve:
-  lc test                        test the current problem, or all when undetected
-  lc test [ts|py] ID             test one problem (TypeScript by default)
-  lc test [ts|py] PATH           test one file
-  lc watch [ID|PATH]             watch TypeScript tests
-  lc submit [ts|py] [ID]         print judge-ready source
-  lc copy [ts|py] [ID]           submit and copy to the clipboard
+  lc new                        prompt for a URL and language
+  lc URL / lc py URL            start or reopen a problem on main
+  lc test [ts|py] [ID|PATH]      test the active problem (or all if none)
+  lc live [ID|PATH]             rerun TypeScript tests on changes
+  lc done [ts|py] [ID]          check, submit, commit, and push after Accepted
+  lc login [--check]           import or validate a saved cookie session
+  lc logout                    remove saved local credentials
+  lc list [ts|py] [URL]         import or show an ordered practice list
+  lc next [ts|py]               start the first problem without Accepted
+  lc copy [ts|py] [ID]          copy judge-ready source
+  lc show [ts|py] [ID]          print judge-ready source
+  lc help [COMMAND]            show help
 
-Quality:
-  lc ready                       require a complete, fully passing solution
-  lc check                       run format checks, lint, types, and tests
-  lc format [ts|py] [--check]    apply formatting, or only check it
-  lc lint [ts|py]                run linters
-  lc typecheck                   type-check TypeScript
-  lc incomplete                  find untouched scaffold markers
-  lc doctor                      verify the local setup
+Selection: explicit target → caller's problem directory → remembered problem
+→ legacy problem branch. New problems default to TypeScript.
 
-Short aliases: t=test, w=watch, s=submit, r=ready, c=check, fmt=format.
-Languages default to TypeScript. Current problem detection uses the caller's problem
-directory first, then a matching feat/p-####-* branch. Use COMMAND --help for this help.
+Also: ready, check, format, lint, typecheck, incomplete, doctor, test-all.
+Compatibility: watch=live, submit=show, finish=done; t, w, s, r, c, fmt,
+n/add/a, d, f, fc, submission, types still work.
+Runner options: lc test -- -k boundary (Python), lc test -- -t boundary (Vitest).
+Manual fallback: lc new [ts|py] ID TITLE... [--url URL] [--signature SIG]
+Setup: ./bin/setup --trust
 """
+COMMAND_HELP = {
+    "list": "lc list [ts|py] URL / lc list / lc list --refresh\nImport one problem-list in website order, show progress, or refresh its saved URL.\nImport requires lc login. Next: lc next",
+    "next": "lc next [ts|py]\nStart or reopen the first unsolved problem in the saved practice list.\nOnly Accepted advances the list, in either language. Next: lc test",
+    "new": "lc new [ts|py] [URL]\nPrompt for a URL and language, or reopen an existing problem.\nManual: lc new [ts|py] ID TITLE... [--url URL] [--signature SIG]\nNext: lc test",
+    "test": "lc test [ts|py] [ID|PATH|all] [--watch] [-- RUNNER_ARGS...]\nTest the active problem. Use all for the full suite.\nExamples: lc test -- -k boundary; lc test ts 35 -- -t example\nNext: lc done",
+    "live": "lc live [ts] [ID|PATH] [-- RUNNER_ARGS...]\nRerun TypeScript tests on changes; Ctrl-C stops.\nNext: lc done",
+    "show": "lc show [ts|py] [ID] [--copy]\nCheck the focused tests and print judge-ready source.\nNext: lc done",
+    "copy": "lc copy [ts|py] [ID]\nCheck the focused tests and copy judge-ready source.\nNext: paste into LeetCode, or run lc done",
+    "login": "lc login [--check]\nSign in at leetcode.com in your normal browser.\nIn Developer Tools, open Application → Storage → Cookies → https://leetcode.com.\nCopy the Value of LEETCODE_SESSION, then csrftoken, into the two hidden terminal prompts.\nPress Enter after each paste; no characters appear while pasting.\nIf LEETCODE_SESSION is missing, finish account sign-in and reload the page.\n--check validates the saved session without prompting or opening a browser.",
+    "logout": "lc logout\nRemove saved local credentials; this does not sign out on LeetCode.",
+    "done": "lc done [ts|py] [ID] [--browser] [--resume SUBMISSION_ID | --retry-uncertain]\nRequire main, format this problem, run lc ready, submit, and wait.\nAfter Accepted: commit only this problem and push to origin/main.\nRetries resume judging or saving. First run lc login in a local terminal.\nDefault: saved cookie session over HTTP; --browser uses dedicated Playwright.\nRecovery: --resume verifies a submission's source, language, and problem.\nUse --retry-uncertain only after checking LeetCode history shows no submission.\nNext after rejection: edit the solution, then lc test",
+}
 PROBLEM_PATH = re.compile(r"^/problems/(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)(?:/description)?/?$")
 PROBLEM_DIRECTORY = re.compile(r"^p_(?P<problem_id>[0-9]+)_.+$")
 PROBLEM_BRANCH = re.compile(r"^feat/p-(?P<problem_id>[0-9]{4,})-[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -114,7 +142,10 @@ class ProblemMetadata:
     title: str
     title_slug: str
     canonical_url: str
-    signature: str
+    signature: str | None
+    examples: tuple[Example, ...] = ()
+    template_reason: str | None = None
+    starter: str | None = None
 
 
 @dataclass(frozen=True)
@@ -134,6 +165,7 @@ class ScaffoldResult:
     source_path: Path
     test_path: Path
     branch: str
+    reopened: bool = False
 
 
 @dataclass(frozen=True)
@@ -277,6 +309,8 @@ def extract_python_signature(source: str) -> str:
         "str",
         "tuple",
         "type",
+        "ListNode",
+        "TreeNode",
     }
     unsupported_names = sorted(_annotation_names(function) - allowed_names)
     if unsupported_names:
@@ -415,11 +449,20 @@ def fetch_problem_metadata(
     )
     if not isinstance(snippet, str) or not snippet.strip():
         raise LeetError(f"LeetCode has no {language_slug} starter code for this problem")
-    signature = (
-        extract_typescript_signature(snippet)
-        if language == "ts"
-        else extract_python_signature(snippet)
-    )
+    starter = None
+    try:
+        signature = (
+            extract_typescript_signature(snippet)
+            if language == "ts"
+            else extract_python_signature(snippet)
+        )
+    except LeetError:
+        signature = None
+        starter = snippet
+    examples, template_reason = extract_examples(question)
+    if signature is None:
+        examples = ()
+        template_reason = "Use the official starter below and adapt the test for this API."
     try:
         problem_id = normalize_problem_id(problem_number)
         slugify(title)
@@ -431,6 +474,9 @@ def fetch_problem_metadata(
         title_slug=requested_slug,
         canonical_url=canonical_url,
         signature=signature,
+        examples=examples,
+        template_reason=template_reason,
+        starter=starter,
     )
 
 
@@ -440,65 +486,37 @@ def _git_error(action: str, result: CommandResult) -> LeetError:
 
 
 def preflight_git(root: Path, run: GitRunner = run_command) -> str:
-    """Require the repository root, a clean worktree, and an attached branch."""
+    """Require this worktree's main branch without disturbing unrelated edits."""
     repository = run(("git", "rev-parse", "--show-toplevel"), root)
     if repository.returncode != 0:
         raise _git_error("locate the repository", repository)
-    try:
-        is_root = Path(repository.stdout.strip()).resolve() == root.resolve()
-    except OSError:
-        is_root = False
-    if not is_root:
+    if Path(repository.stdout.strip()).resolve() != root.resolve():
         raise LeetError("lc must run for this repository's root worktree")
-
-    status = run(("git", "status", "--porcelain"), root)
-    if status.returncode != 0:
-        raise _git_error("inspect the worktree", status)
-    if status.stdout.strip():
-        raise LeetError("worktree must be clean before creating a problem branch")
-
     current = run(("git", "branch", "--show-current"), root)
     if current.returncode != 0:
         raise _git_error("read the current branch", current)
-    branch = current.stdout.strip()
-    if not branch:
-        raise LeetError("cannot create a problem branch from a detached HEAD")
-    return branch
+    if current.stdout.strip() != "main":
+        raise LeetError("start problems on main; next: git switch main")
+    return "main"
 
 
-def _require_new_branch(root: Path, branch: str, run: GitRunner) -> None:
-    existing = run(("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"), root)
-    if existing.returncode == 0:
-        raise LeetError(f"branch already exists: {branch}")
-    if existing.returncode != 1:
-        raise _git_error("check the target branch", existing)
-
-    remote_refs = run(("git", "for-each-ref", "--format=%(refname)", "refs/remotes"), root)
-    if remote_refs.returncode != 0:
-        raise _git_error("check remote target branches", remote_refs)
-    remote_suffix = f"/{branch}"
-    if any(ref.strip().endswith(remote_suffix) for ref in remote_refs.stdout.splitlines()):
-        raise LeetError(f"branch already exists on a remote: {branch}")
-
-
-def _require_new_problem(root: Path, language: str, metadata: ProblemMetadata) -> None:
-    slug = slugify(metadata.title)
-    directory, _, _ = build_paths(root, language, metadata.problem_id, slug)
-    existing = matching_problem_directories(directory.parent, metadata.problem_id)
-    if existing:
-        raise LeetError(f"problem ID already exists: {existing[0]}")
-    if directory.exists():
-        raise LeetError(f"target already exists: {directory}")
-
-
-def _rollback_branch(root: Path, original: str, created: str, run: GitRunner) -> str | None:
-    switched = run(("git", "switch", original), root)
-    if switched.returncode != 0:
-        return str(_git_error(f"restore branch {original!r}", switched))
-    deleted = run(("git", "branch", "-D", created), root)
-    if deleted.returncode != 0:
-        return str(_git_error(f"delete rolled-back branch {created!r}", deleted))
-    return None
+def activate_problem(
+    root: Path, language: str, problem_id: str, problem_url: str | None = None
+) -> None:
+    paths = resolve_problem_paths(root, language, problem_id)
+    if problem_url:
+        canonical_url, _ = canonicalize_problem_url(problem_url)
+        write_state(
+            root / ".lc" / "problems" / f"{language}-{paths.problem_id}.json",
+            {"url": canonical_url},
+        )
+    write_state(
+        root / ".lc" / "active.json",
+        {
+            "language": paths.language,
+            "problem_id": paths.problem_id,
+        },
+    )
 
 
 def scaffold_from_url(
@@ -510,35 +528,77 @@ def scaffold_from_url(
     run: GitRunner = run_command,
     creator: ProblemCreator = create_problem,
 ) -> ScaffoldResult:
-    """Fetch, branch, and scaffold one problem as a single guarded workflow."""
-    canonical_url, _ = canonicalize_problem_url(value)
-    original_branch = preflight_git(root, run)
+    """Start on main, or activate existing files without overwriting them."""
+    canonical_url, requested_slug = canonicalize_problem_url(value)
+    preflight_git(root, run)
+    # Reopen known URLs even when LeetCode is offline.
+    language_path = root / "src" / ("python" if language == "py" else "typescript")
+    for directory in sorted(language_path.glob("p_*")):
+        source_path = directory / f"{directory.name}.{language}"
+        if not source_path.is_file():
+            continue
+        content = source_path.read_text(encoding="utf-8")
+        match = PROBLEM_DIRECTORY.fullmatch(directory.name)
+        if match:
+            problem_id = normalize_problem_id(match["problem_id"])
+            remembered = read_state(root / ".lc" / "problems" / f"{language}-{problem_id}.json")
+            if remembered.get("url") == canonical_url or re.search(
+                rf"Problem URL: {re.escape(canonical_url)}(?:\s|$)", content
+            ):
+                paths = resolve_problem_paths(root, language, problem_id)
+                metadata = ProblemMetadata(
+                    problem_id,
+                    requested_slug.replace("-", " "),
+                    requested_slug,
+                    canonical_url,
+                    None,
+                )
+                activate_problem(root, language, problem_id, canonical_url)
+                return ScaffoldResult(
+                    metadata, require_source_path(paths), require_test_path(paths), "main", True
+                )
     metadata = fetch(language, canonical_url)
-    current_branch = preflight_git(root, run)
-    if current_branch != original_branch:
-        raise LeetError("current branch changed while LeetCode metadata was loading")
-    branch = suggested_branch(metadata.problem_id, slugify(metadata.title))
-    _require_new_branch(root, branch, run)
-    _require_new_problem(root, language, metadata)
+    preflight_git(root, run)
+    existing = matching_problem_directories(language_path, metadata.problem_id)
+    if existing:
+        paths = resolve_problem_paths(root, language, metadata.problem_id)
+        source_path, test_path = require_source_path(paths), require_test_path(paths)
+    else:
+        try:
+            source_path, test_path, _ = creator(
+                root,
+                language,
+                metadata.problem_id,
+                [metadata.title],
+                metadata.canonical_url,
+                metadata.signature,
+            )
+            if metadata.starter:
+                from_starter = render_starter(language, metadata, source_path.read_text())
+                source_path.write_text(from_starter, encoding="utf-8")
+            if metadata.examples and metadata.signature:
+                name = validate_signature(language, metadata.signature)[1]
+                test_path.write_text(
+                    render_example_tests(language, source_path.stem, name, metadata.examples),
+                    encoding="utf-8",
+                )
+            elif metadata.template_reason:
+                comment = "#" if language == "py" else "//"
+                test_path.write_text(
+                    f"{comment} {metadata.template_reason}\n" + test_path.read_text(),
+                    encoding="utf-8",
+                )
+        except (ScaffoldError, OSError) as error:
+            raise LeetError(f"could not create scaffold: {error}") from error
+    activate_problem(root, language, metadata.problem_id, metadata.canonical_url)
+    return ScaffoldResult(metadata, source_path, test_path, "main", bool(existing))
 
-    switched = run(("git", "switch", "-c", branch), root)
-    if switched.returncode != 0:
-        raise _git_error(f"create and switch to branch {branch!r}", switched)
-    try:
-        source_path, test_path, _ = creator(
-            root,
-            language,
-            metadata.problem_id,
-            [metadata.title],
-            metadata.canonical_url,
-            metadata.signature,
-        )
-    except (LeetError, ScaffoldError, OSError) as error:
-        rollback_error = _rollback_branch(root, original_branch, branch, run)
-        if rollback_error:
-            raise LeetError(f"{error}; automatic rollback failed: {rollback_error}") from error
-        raise LeetError(f"could not create scaffold: {error}") from error
-    return ScaffoldResult(metadata, source_path, test_path, branch)
+
+def render_starter(language: str, metadata: ProblemMetadata, fallback: str) -> str:
+    """Preserve unusual official APIs as an editable, commented reference."""
+    comment = "#" if language == "py" else "//"
+    reference = "\n".join(f"{comment} {line}" for line in (metadata.starter or "").splitlines())
+    return f"{comment} Official starter: replace the placeholder with this API.\n{reference}\n\n{fallback}"
 
 
 def parse_arguments(arguments: Sequence[str]) -> tuple[str, str]:
@@ -571,12 +631,15 @@ COMMAND_ALIASES = {
     "fmt": "format",
     "n": "new",
     "r": "ready",
-    "s": "submit",
-    "submission": "submit",
     "t": "test",
     "test-all": "test-all",
     "types": "typecheck",
-    "w": "watch",
+    "w": "live",
+    "watch": "live",
+    "submit": "show",
+    "s": "show",
+    "submission": "show",
+    "finish": "done",
 }
 
 
@@ -630,10 +693,18 @@ def detect_problem_context(
     *,
     git_run: GitRunner = run_command,
 ) -> ProblemContext | None:
-    """Infer the current problem from the caller's directory, then its Git branch."""
+    """Resolve the caller directory, remembered selection, then legacy branches."""
     directory_context = _context_from_directory(root, caller_cwd)
     if directory_context is not None:
         return directory_context
+
+    active = read_state(root / ".lc" / "active.json")
+    if active:
+        try:
+            paths = resolve_problem_paths(root, active["language"], active["problem_id"])
+            return ProblemContext(paths.language, paths.problem_id, paths.directory)
+        except KeyError, TypeError, AttributeError, ProblemPathError:
+            pass  # A removed problem does not hide a usable legacy branch.
 
     current = git_run(("git", "branch", "--show-current"), root)
     if current.returncode != 0:
@@ -657,8 +728,6 @@ def _split_passthrough(arguments: Sequence[str]) -> tuple[list[str], list[str]]:
     if "--" not in values:
         return values, []
     separator = values.index("--")
-    if "--" in values[separator + 1 :]:
-        raise LcUsageError("-- may only be provided once")
     return values[:separator], values[separator + 1 :]
 
 
@@ -726,15 +795,14 @@ def _test_command(
 
     if target is not None:
         _normalized_problem_id(target)
-        if passthrough:
-            raise LcUsageError("focused ID tests do not accept runner arguments; use a test path")
         selected_language = language or "ts"
         if watch and selected_language == "py":
             raise LcUsageError("--watch is only supported for TypeScript tests")
         command = ["pnpm", "run", "test:one", selected_language, target]
         if watch:
             command.append("--watch")
-        command.extend(passthrough)
+        if passthrough:
+            command.extend(["--", *passthrough])
         return tuple(command)
 
     if language is not None:
@@ -745,14 +813,13 @@ def _test_command(
 
     context = None if explicit_all else detect_problem_context(root, caller_cwd, git_run=git_run)
     if context is not None:
-        if passthrough:
-            raise LcUsageError("focused tests do not accept runner arguments; use a test path")
         if watch and context.language == "py":
             raise LcUsageError("--watch is only supported for TypeScript tests")
         command = ["pnpm", "run", "test:one", context.language, context.problem_id]
         if watch:
             command.append("--watch")
-        command.extend(passthrough)
+        if passthrough:
+            command.extend(["--", *passthrough])
         return tuple(command)
     if watch:
         return ("pnpm", "run", "test:ts:watch", *passthrough)
@@ -776,14 +843,14 @@ def _submit_command(
         raise LcUsageError("--copy may only be provided once")
     unknown = next((value for value in values if value.startswith("-")), None)
     if unknown is not None:
-        raise LcUsageError(f"unknown submit option: {unknown}")
+        raise LcUsageError(f"unknown show option: {unknown}")
 
     language: str | None = None
     if values and (selected := _canonical_language(values[0])) is not None:
         language = selected
         values.pop(0)
     if len(values) > 1:
-        raise LcUsageError("usage: lc submit [ts|py] [ID] [--copy]")
+        raise LcUsageError("usage: lc show [ts|py] [ID] [--copy]")
 
     if values:
         problem_id = values[0]
@@ -850,13 +917,13 @@ def build_command(
 
     if command == "test":
         return _test_command(rest, root, caller_cwd, git_run=git_run)
-    if command == "watch":
+    if command == "live":
         return _test_command(rest, root, caller_cwd, force_watch=True, git_run=git_run)
     if command == "test-all":
         if rest:
             raise LcUsageError("test-all does not accept arguments")
         return ("pnpm", "run", "test")
-    if command == "submit":
+    if command == "show":
         return _submit_command(rest, root, caller_cwd, git_run=git_run)
     if command == "copy":
         return _submit_command(rest, root, caller_cwd, force_copy=True, git_run=git_run)
@@ -890,7 +957,10 @@ def build_command(
         if rest:
             raise LcUsageError(f"{command} does not accept arguments")
         return ("pnpm", "run", script)
-    raise LcUsageError(f"unknown command: {arguments[0]}; run 'lc help'")
+    candidates = [*COMMAND_HELP, *scripts, "format", "lint", "format-check", *COMMAND_ALIASES]
+    match = difflib.get_close_matches(arguments[0], candidates, n=1, cutoff=0.55)
+    hint = f"; did you mean 'lc {match[0]}'?" if match else "; next: lc help"
+    raise LcUsageError(f"unknown command: {arguments[0]}{hint}")
 
 
 def run_interactive_command(command: Sequence[str], cwd: Path) -> int:
@@ -917,48 +987,305 @@ def _url_invocation(arguments: Sequence[str]) -> tuple[str, str] | None:
 
 
 def _print_scaffold_result(result: ScaffoldResult, root: Path, language: str) -> None:
-    print(f"LeetCode {result.metadata.problem_id}: {result.metadata.title}")
-    print(f"Signature: {result.metadata.signature}")
-    print(f"Branch: {result.branch}")
-    print(f"Created: {result.source_path.relative_to(root)}")
-    print(f"Created: {result.test_path.relative_to(root)}")
-    print("Next steps:")
-    print("  lc test")
-    if language == "ts":
-        print("  lc watch")
-    print("  lc ready")
+    print(f"LeetCode {result.metadata.problem_id}: {result.metadata.title} ({language})")
+    if result.metadata.signature:
+        print(f"Signature: {result.metadata.signature}")
+    verb = "Opened" if result.reopened else "Created"
+    print(f"{verb}: {result.source_path.relative_to(root)}")
+    print(f"{verb}: {result.test_path.relative_to(root)}")
+    if not result.reopened and result.metadata.template_reason:
+        print(result.metadata.template_reason)
+    print("Next: edit the solution, then lc test" + (" (or lc live)" if language == "ts" else ""))
+    print("When ready: lc done")
+
+
+def command_help(command: str) -> str:
+    canonical = COMMAND_ALIASES.get(command, command)
+    if canonical in COMMAND_HELP:
+        return COMMAND_HELP[canonical]
+    quality = {
+        "ready": "Require completed scaffolds, then run the full quality gate.",
+        "check": "Run formatting checks, lint, types, judge compatibility, and all tests.",
+        "format": "lc format [ts|py] [--check] — format files or check formatting.",
+        "format-check": "lc format-check [ts|py] — check formatting.",
+        "lint": "lc lint [ts|py] — run linters.",
+        "typecheck": "Type-check TypeScript.",
+        "incomplete": "List unfinished scaffold markers.",
+        "doctor": "Inspect tools, dependencies, and hooks. Next: ./bin/setup --trust",
+        "test-all": "Run all tests in both languages.",
+    }
+    if canonical in quality:
+        return f"lc {canonical}\n{quality[canonical]}"
+    raise LcUsageError(f"unknown command: {command}; next: lc help")
+
+
+def prompt_new(language: str | None = None) -> list[str]:
+    if not sys.stdin.isatty():
+        raise LcUsageError("lc new needs a URL without a terminal; next: lc new URL")
+    url = input("Problem URL (blank cancels): ").strip()
+    if not url:
+        return []
+    if language is None:
+        selected = input("Language [ts/py, default ts]: ").strip() or "ts"
+        language = _canonical_language(selected)
+        if language is None:
+            raise LcUsageError("language must be ts or py; next: lc new")
+    return [language, url]
+
+
+def select_problem(root: Path) -> None:
+    choices = []
+    for language, folder in (("ts", "typescript"), ("py", "python")):
+        for directory in sorted((root / "src" / folder).glob("p_*")):
+            match = PROBLEM_DIRECTORY.fullmatch(directory.name)
+            if directory.is_dir() and match:
+                choices.append((language, match["problem_id"], directory.name))
+    if not choices:
+        print("No problems yet. Next: lc new")
+        return
+    for index, (language, problem_id, name) in enumerate(choices, 1):
+        title = name.split("_", 2)[2].replace("_", " ")
+        print(f"{index}. {problem_id} {title} ({language})")
+    choice = input("Problem number (blank cancels): ").strip()
+    if not choice:
+        return
+    if not choice.isdecimal() or not 1 <= int(choice) <= len(choices):
+        raise LcUsageError("choose a displayed problem number")
+    language, problem_id, _ = choices[int(choice) - 1]
+    activate_problem(root, language, problem_id)
+
+
+def menu(root: Path, caller_cwd: Path) -> int:
+    # Explicit selections inside the menu override the directory it was opened from.
+    context = detect_problem_context(root, caller_cwd)
+    if context:
+        activate_problem(root, context.language, context.problem_id)
+    while True:
+        context = detect_problem_context(root, root)
+        label = (
+            f"{context.problem_id} {context.directory.name.split('_', 2)[2].replace('_', ' ')} ({context.language})"
+            if context
+            else "none"
+        )
+        print(f"\nActive problem: {label}")
+        print(
+            "1. New problem\n2. Select problem\n3. Test\n4. Live tests (TypeScript)\n"
+            "5. Done — submit, commit, and push\n6. Copy source\n7. Show source\n8. Help\n9. Login\n10. Logout\n11. List\n12. Next problem\n0. Quit"
+        )
+        try:
+            choice = input("Choose an action: ").strip().lower()
+            if choice in {"0", "q", "quit"}:
+                return 0
+            if not choice:
+                continue
+            if choice in {"2", "select"}:
+                select_problem(root)
+                continue
+            actions = {
+                "1": "new",
+                "3": "test",
+                "4": "live",
+                "5": "done",
+                "6": "copy",
+                "7": "show",
+                "8": "help",
+                "9": "login",
+                "10": "logout",
+                "11": "list",
+                "12": "next",
+            }
+            action = actions.get(choice, choice)
+            if action not in {*actions.values(), "new"}:
+                print("Choose a displayed number or action name.")
+                continue
+            if action == "list":
+                list_menu(root)
+            else:
+                dispatch([action], root, root)
+        except (LcUsageError, LeetError, StateError, ProblemPathError, OSError) as error:
+            print(f"error: {error}\nNext: lc help", file=sys.stderr)
+        except EOFError, KeyboardInterrupt:
+            return 0
+
+
+def dispatch(arguments: list[str], root: Path, caller_cwd: Path) -> int:
+    canonical = COMMAND_ALIASES.get(arguments[0], arguments[0])
+    if canonical == "help":
+        print(command_help(arguments[1]) if len(arguments) > 1 else HELP)
+        return 0
+    if canonical in {"list", "next"}:
+        return practice_command(canonical, arguments[1:], root)
+    if canonical == "new" and (
+        len(arguments) == 1 or (len(arguments) == 2 and _canonical_language(arguments[1]))
+    ):
+        arguments = prompt_new(_canonical_language(arguments[1]) if len(arguments) > 1 else None)
+        if not arguments:
+            return 0
+    url_invocation = _url_invocation(arguments)
+    if url_invocation is not None:
+        language, problem_url = url_invocation
+        result = scaffold_from_url(root, language, problem_url)
+        _print_scaffold_result(result, root, language)
+        return 0
+    if canonical in {"login", "logout"}:
+        try:
+            from scripts.leetcode_session import BrowserError, login_command, logout_command
+        except ModuleNotFoundError:
+            from leetcode_session import BrowserError, login_command, logout_command
+        try:
+            handler = login_command if canonical == "login" else logout_command
+            return handler(arguments[1:], root)
+        except BrowserError as error:
+            raise LeetError(str(error)) from error
+    if canonical == "done":
+        try:
+            from scripts.done import done_command, DoneError
+        except ModuleNotFoundError:
+            from done import done_command, DoneError
+        try:
+            return done_command(arguments[1:], root, caller_cwd)
+        except DoneError as error:
+            raise LeetError(str(error)) from error
+    command = build_command(arguments, root, caller_cwd)
+    if canonical == "new":
+        preflight_git(root)
+        language, problem_id = command[3:5]
+        folder = root / "src" / ("python" if language == "py" else "typescript")
+        if matching_problem_directories(folder, _normalized_problem_id(problem_id)):
+            paths = resolve_problem_paths(root, language, problem_id)
+            require_source_path(paths)
+            require_test_path(paths)
+            activate_problem(root, language, problem_id)
+            print(f"Opened: {paths.directory.relative_to(root)} ({language})\nNext: lc test")
+            return 0
+    result = run_interactive_command(command, root)
+    if result:
+        print(f"Next: lc help {canonical}", file=sys.stderr)
+    return result
+
+
+def list_menu(root: Path) -> None:
+    try:
+        from scripts.practice import PracticeError, load_list
+    except ModuleNotFoundError:
+        from practice import PracticeError, load_list
+    try:
+        saved = load_list(root)
+    except (PracticeError, StateError) as error:
+        print(f"error: {error}", file=sys.stderr)
+        saved = {}
+    if saved:
+        dispatch(["list"], root, root)
+    print("1. Import a list\n2. Refresh saved list\n0. Back")
+    choice = input("List action (blank cancels): ").strip().lower()
+    if choice in {"", "0", "back"}:
+        return
+    if choice in {"2", "refresh"}:
+        dispatch(["list", "--refresh"], root, root)
+        return
+    if choice not in {"1", "import"}:
+        raise LcUsageError("choose a displayed list action")
+    url = input("Practice list URL (blank cancels): ").strip()
+    if not url:
+        return
+    language = input("Language [ts/py, default ts]: ").strip() or "ts"
+    dispatch(["list", language, url], root, root)
+
+
+def practice_command(command: str, arguments: list[str], root: Path) -> int:
+    try:
+        from scripts import practice
+        from scripts.leetcode_session import BrowserError
+    except ModuleNotFoundError:
+        import practice
+        from leetcode_session import BrowserError
+    usage = (
+        "usage: lc list [ts|py] URL | lc list [--refresh]"
+        if command == "list"
+        else "usage: lc next [ts|py]"
+    )
+    try:
+        if command == "next":
+            if len(arguments) > 1 or (arguments and arguments[0] not in {"ts", "py"}):
+                raise LcUsageError(usage)
+            state = practice.load_list(root)
+            if not state:
+                raise LcUsageError("no saved practice list; next: lc list URL")
+            question = practice.next_question(root, state)
+            if question is None:
+                print("Practice list complete. All problems have Accepted.")
+                return 0
+            language = arguments[0] if arguments else state["language"]
+            result = scaffold_from_url(
+                root, language, f"https://leetcode.com/problems/{question['titleSlug']}/"
+            )
+            _print_scaffold_result(result, root, language)
+            return 0
+        if arguments == ["--refresh"]:
+            state = practice.load_list(root)
+            if not state:
+                raise LcUsageError("no saved practice list; next: lc list URL")
+            state = practice.import_list(root, state["url"], state["language"])
+        elif arguments:
+            if (
+                len(arguments) == 1
+                and arguments[0] not in {"ts", "py"}
+                and not arguments[0].startswith("-")
+            ):
+                language, url = "ts", arguments[0]
+            elif len(arguments) == 2 and arguments[0] in {"ts", "py"}:
+                language, url = arguments
+            else:
+                raise LcUsageError(usage)
+            state = practice.import_list(root, url, language)
+        else:
+            state = practice.load_list(root)
+            if not state:
+                if not sys.stdin.isatty():
+                    raise LcUsageError("no saved practice list; next: lc list URL")
+                url = input("Practice list URL (blank cancels): ").strip()
+                if not url:
+                    return 0
+                language = input("Language [ts/py, default ts]: ").strip() or "ts"
+                state = practice.import_list(root, url, language)
+        practice.show_list(root, state)
+        return 0
+    except (practice.PracticeError, BrowserError) as error:
+        raise LeetError(str(error)) from error
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    """Run the unified local LeetCode command."""
+    """Run commands without prompts unless the user opens the menu or asks for new."""
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if not arguments or arguments[0] in {"-h", "--help", "help"}:
-        print(HELP)
-        return 0
-    if any(argument in {"-h", "--help"} for argument in arguments[1:]):
-        print(HELP)
-        return 0
     root = Path(__file__).resolve().parents[1]
-    caller_cwd = Path(os.environ.get("LC_CALLER_CWD", root))
+    caller_cwd = Path(os.environ.get("LC_CALLER_CWD", Path.cwd()))
     try:
-        url_invocation = _url_invocation(arguments)
-        if url_invocation is not None:
-            language, problem_url = url_invocation
-            result = scaffold_from_url(root, language, problem_url)
-            _print_scaffold_result(result, root, language)
+        options, _ = _split_passthrough(arguments)
+        if options and options[0] in {"-h", "--help"}:
+            print(HELP)
             return 0
-        command = build_command(arguments, root, caller_cwd)
-        return run_interactive_command(command, root)
-    except LcUsageError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2
-    except LeetError as error:
-        print(f"error: {error}", file=sys.stderr)
-        return 2 if str(error).startswith("usage:") else 1
-    except KeyboardInterrupt:
+        if any(argument in {"-h", "--help"} for argument in options[1:]):
+            print(command_help(options[0]))
+            return 0
+        if not arguments:
+            if sys.stdin.isatty():
+                return menu(root, caller_cwd)
+            context = detect_problem_context(root, caller_cwd)
+            print(
+                f"Active problem: {context.problem_id} ({context.language})"
+                if context
+                else "Active problem: none"
+            )
+            print(HELP)
+            return 0
+        return dispatch(arguments, root, caller_cwd)
+    except (LcUsageError, LeetError, StateError, ProblemPathError, ScaffoldError) as error:
+        print(f"error: {error}\nNext: lc help", file=sys.stderr)
+        return 2 if isinstance(error, LcUsageError) else 1
+    except KeyboardInterrupt, EOFError:
         return 130
     except OSError as error:
-        print(f"error: could not start project command: {error}", file=sys.stderr)
+        print(f"error: {error}\nNext: ./bin/setup --trust, then retry", file=sys.stderr)
         return 1
 
 

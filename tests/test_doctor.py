@@ -10,6 +10,7 @@ from scripts.doctor import CommandResult, collect_checks, format_report, main, p
 
 
 def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None:
+    (root / ".judge-node-version").write_text("22.14.0\n", encoding="utf-8")
     (root / ".node-version").write_text("22.14.0\n", encoding="utf-8")
     (root / "mise.toml").write_text(
         '[tools]\nnode = "22.14.0"\n"npm:pnpm" = "11.20.0"\npython = "3.14.7"\nuv = "0.12.2"\n',
@@ -24,6 +25,7 @@ def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None
                     "@biomejs/biome": "2.5.7",
                     "lefthook": "2.1.10",
                     "typescript": "5.7.3",
+                    "typescript-judge": "npm:typescript@5.7.3",
                     "vitest": "4.1.10",
                 },
             }
@@ -33,7 +35,7 @@ def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None
     (root / "pyproject.toml").write_text(
         "[dependency-groups]\n"
         'dev = ["pytest==9.1.1", "pytest-timeout==2.4.0", '
-        '"pytest-watcher==0.6.3", "ruff==0.16.2"]\n',
+        '"pytest-watcher==0.6.3", "ruff==0.16.2", "playwright==1.63.0"]\n',
         encoding="utf-8",
     )
 
@@ -48,13 +50,19 @@ def write_dependencies(
         "@biomejs/biome": "2.5.7",
         "lefthook": "2.1.10",
         "typescript": "5.7.3",
+        "typescript-judge": "5.7.3",
         "vitest": node_version,
     }
     for dependency, version in node_versions.items():
         node_dependency = root / "node_modules" / dependency
         node_dependency.mkdir(parents=True)
         (node_dependency / "package.json").write_text(
-            json.dumps({"name": dependency, "version": version}),
+            json.dumps(
+                {
+                    "name": "typescript" if dependency == "typescript-judge" else dependency,
+                    "version": version,
+                }
+            ),
             encoding="utf-8",
         )
 
@@ -62,6 +70,7 @@ def write_dependencies(
     python_versions = {
         "pytest": python_version,
         "ruff": "0.16.2",
+        "playwright": "1.63.0",
     }
     for dependency, version in python_versions.items():
         metadata_directory = site_packages / f"{dependency}-{version}.dist-info"
@@ -86,6 +95,8 @@ def write_lefthook_installation(root: Path) -> None:
 
 def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResult:
     outputs = {
+        ("mise", "where", "node@22.14.0"): "/tmp/judge-node",
+        ("/tmp/judge-node/bin/node", "--version"): "v22.14.0\n",
         ("mise", "trust", "--show"): "/tmp/project: trusted\n",
         ("node", "--version"): "v22.14.0\n",
         ("pnpm", "--version"): "11.20.0\n",
@@ -292,3 +303,24 @@ def test_main_returns_nonzero_when_setup_is_incomplete(
 ) -> None:
     assert main([str(tmp_path)]) == 1
     assert "FAIL metadata:" in capsys.readouterr().out
+
+
+def test_doctor_reports_missing_judge_runtime_and_alias(tmp_path: Path) -> None:
+    write_metadata(tmp_path)
+    write_dependencies(tmp_path)
+    write_lefthook_installation(tmp_path)
+    (tmp_path / "node_modules/typescript-judge/package.json").unlink()
+
+    def run(command, root):
+        if tuple(command) == ("mise", "where", "node@22.14.0"):
+            return CommandResult(1, stderr="not installed")
+        return command_runner(command, root)
+
+    checks = {
+        check.name: check
+        for check in collect_checks(tmp_path, find_command=lambda _: "/tool", run=run)
+    }
+    assert not checks["judge Node"].passed
+    assert "mise install node@22.14.0" in checks["judge Node"].detail
+    assert not checks["node_modules (typescript-judge)"].passed
+    assert "pnpm install --frozen-lockfile" in checks["node_modules (typescript-judge)"].detail

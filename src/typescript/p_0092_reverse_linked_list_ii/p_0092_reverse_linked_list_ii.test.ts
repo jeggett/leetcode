@@ -1,4 +1,4 @@
-import { LinkedList } from "../data_structures/linked_list.js";
+import { listFromArray, listToArray } from "../data_structures/helpers.js";
 import { reverseBetween } from "./p_0092_reverse_linked_list_ii.js";
 
 const cases = [
@@ -14,14 +14,6 @@ const cases = [
 ];
 
 test.each(cases)("$name", ({ values, left, right, expected }) => {
-    const list = new LinkedList([...values]);
-    const result = reverseBetween(list.head, left, right);
-    const actual: number[] = [];
-    let current = result;
-    while (current !== null) {
-        actual.push(current.val);
-        current = current.next;
-    }
-
-    expect(actual).toEqual(expected);
+    const result = reverseBetween(listFromArray(values), left, right);
+    expect(listToArray(result)).toEqual(expected);
 });

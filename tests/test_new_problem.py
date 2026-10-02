@@ -298,7 +298,7 @@ def test_main_prints_short_focused_test_and_ready_steps(
 
     output = capsys.readouterr().out
     assert "lc test py 0008" in output
-    assert "lc ready" in output
+    assert "lc done" in output
 
 
 def test_main_prints_typescript_watch_command(
@@ -310,7 +310,7 @@ def test_main_prints_typescript_watch_command(
 
     output = capsys.readouterr().out
     assert "lc test ts 0008" in output
-    assert "lc watch 0008" in output
+    assert "lc live 0008" in output
 
 
 def test_usage_mentions_signature_option() -> None:

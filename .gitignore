@@ -195,6 +195,7 @@ build/Release
 
 # Dependency directories
 node_modules/
+.pnpm-store/
 jspm_packages/
 
 # TypeScript cache
@@ -242,3 +243,6 @@ jspm_packages/
 .pnp.*
 
 .idea/
+
+# Active problem, submission journal, and dedicated browser session
+.lc/

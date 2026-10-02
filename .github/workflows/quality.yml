@@ -23,6 +23,7 @@ jobs:
       - uses: jdx/mise-action@v4
         with:
           install: true
+      - run: mise install "node@$(cat .judge-node-version)"
       - run: pnpm install --frozen-lockfile
       - run: uv sync --frozen
       - run: pnpm ready:all

@@ -31,8 +31,8 @@ VERSION_COMMANDS = {
 VERSION_PATTERN = re.compile(r"v?(\d+(?:\.\d+){0,2})")
 PACKAGE_MANAGER_PATTERN = re.compile(r"pnpm@v?(\d+(?:\.\d+){0,2})")
 
-NODE_DEPENDENCIES = ("@biomejs/biome", "typescript", "vitest", "lefthook")
-PYTHON_DEPENDENCIES = ("pytest", "ruff")
+NODE_DEPENDENCIES = ("@biomejs/biome", "typescript", "typescript-judge", "vitest", "lefthook")
+PYTHON_DEPENDENCIES = ("pytest", "ruff", "playwright")
 # Compatibility names retained for callers that used the original
 # representative-dependency checks.
 NODE_DEPENDENCY = "vitest"
@@ -258,6 +258,8 @@ def package_dependency_version(package: dict[str, object], dependency: str) -> s
     """Return an exact Node development-dependency version when one is pinned."""
     dev_dependencies = package.get("devDependencies")
     version = dev_dependencies.get(dependency) if isinstance(dev_dependencies, dict) else None
+    if dependency == "typescript-judge" and isinstance(version, str):
+        version = version.removeprefix("npm:typescript@")
     match = VERSION_PATTERN.fullmatch(version) if isinstance(version, str) else None
     return match.group(1) if match else None
 
@@ -289,7 +291,9 @@ def installed_node_dependency_version(root: Path, dependency: str) -> str | None
     except OSError, UnicodeDecodeError, json.JSONDecodeError:
         return None
 
-    if not isinstance(manifest, dict) or manifest.get("name") != dependency:
+    if not isinstance(manifest, dict) or manifest.get("name") != (
+        "typescript" if dependency == "typescript-judge" else dependency
+    ):
         return None
     version = manifest.get("version")
     return version if isinstance(version, str) else None
@@ -559,9 +563,33 @@ def collect_checks(
 
     checks.extend(metadata_checks(tools, package))
     checks.extend(version_checks(root, tools, package, available, run))
+    checks.append(judge_node_check(root, available, run))
     checks.extend(dependency_checks(root, package, project))
     checks.extend(lefthook_checks(root, available, run))
     return checks
+
+
+def judge_node_check(root: Path, available: set[str], run: CommandRunner) -> Check:
+    """Inspect the separately installed judge runtime without downloading it."""
+    version = (read_text_file(root / ".judge-node-version") or "").strip()
+    remedy = f"run mise install node@{version} (or ./bin/setup --trust)"
+    if not re.fullmatch(r"\d+\.\d+\.\d+", version):
+        return Check("judge Node", False, "missing or invalid .judge-node-version")
+    if "mise" not in available:
+        return Check("judge Node", False, f"mise command is unavailable; {remedy}")
+    located = _run(run, ("mise", "where", f"node@{version}"), root)
+    if located.returncode or not located.stdout.strip():
+        return Check("judge Node", False, f"Node {version} is unavailable; {remedy}")
+    node = Path(located.stdout.strip()) / "bin/node"
+    result = _run(run, (str(node), "--version"), root)
+    passed = result.returncode == 0 and result.stdout.strip() == f"v{version}"
+    return Check(
+        "judge Node",
+        passed,
+        version
+        if passed
+        else f"expected {version}, found {result.stdout.strip() or 'unavailable'}; {remedy}",
+    )
 
 
 def format_report(checks: Sequence[Check]) -> str:

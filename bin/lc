@@ -43,8 +43,13 @@ for argument in "$@"; do
 done
 
 case "${1-}" in
-    ""|help)
+    help)
         exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+        ;;
+    "")
+        if [ ! -t 0 ]; then
+            exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py"
+        fi
         ;;
     doctor|d)
         # Doctor is the bootstrap path: never let its diagnostics trigger mise's

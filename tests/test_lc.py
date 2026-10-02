@@ -202,7 +202,7 @@ def test_extracts_and_modernizes_official_python_signature() -> None:
         ),
         (
             extract_python_signature,
-            "class Solution:\n    def reverseList(self, head: Optional[ListNode]) -> Optional[ListNode]:\n        pass\n",
+            "class Solution:\n    def cloneGraph(self, node: Optional[GraphNode]) -> Optional[GraphNode]:\n        pass\n",
             "unsupported judge type",
         ),
     ],
@@ -230,7 +230,9 @@ def test_fetches_official_metadata_and_selected_language_signature(
 
     result = fetch_problem_metadata(language, PROBLEM_URL, open_url=open_url)
 
-    assert result == metadata(expected)
+    assert result.signature == expected
+    assert result.problem_id == "0035"
+    assert result.template_reason == "Official examples or judging metadata are unavailable."
     request = captured["request"]
     assert isinstance(request, Request)
     assert request.full_url == "https://leetcode.com/graphql/"
@@ -284,7 +286,7 @@ def test_reports_network_and_malformed_response_failures() -> None:
         )
 
 
-def test_scaffolds_on_a_new_checked_out_branch(tmp_path: Path) -> None:
+def test_scaffolds_on_main(tmp_path: Path) -> None:
     git = FakeGit(tmp_path)
 
     result = scaffold_from_url(
@@ -295,13 +297,14 @@ def test_scaffolds_on_a_new_checked_out_branch(tmp_path: Path) -> None:
         run=git,
     )
 
-    assert result.branch == "feat/p-0035-search-insert-position"
+    assert result.branch == "main"
     assert git.current_branch == result.branch
     assert result.source_path.read_text(encoding="utf-8").startswith(
         "// LeetCode 0035: Search Insert Position."
     )
     assert f"export function {TS_SIGNATURE}" in result.source_path.read_text(encoding="utf-8")
-    assert ("git", "switch", "-c", result.branch) in git.calls
+    assert not any(call[:2] == ("git", "switch") for call in git.calls)
+    assert lc.detect_problem_context(tmp_path, tmp_path, git_run=git).problem_id == "0035"
 
 
 def test_scaffolds_python_with_the_normalized_official_signature(tmp_path: Path) -> None:
@@ -317,7 +320,7 @@ def test_scaffolds_python_with_the_normalized_official_signature(tmp_path: Path)
 
     assert result.source_path.name == "p_0035_search_insert_position.py"
     assert f"def {PY_SIGNATURE}:" in result.source_path.read_text(encoding="utf-8")
-    assert git.current_branch == "feat/p-0035-search-insert-position"
+    assert git.current_branch == "main"
 
 
 def test_scaffolds_with_real_git_branch_checkout(tmp_path: Path) -> None:
@@ -366,96 +369,77 @@ def test_scaffolds_with_real_git_branch_checkout(tmp_path: Path) -> None:
     assert result.source_path.is_file()
 
 
-def test_dirty_worktree_stops_before_network_or_branch_creation(tmp_path: Path) -> None:
+def test_start_preserves_unrelated_work(tmp_path: Path) -> None:
     git = FakeGit(tmp_path, dirty=True)
-    fetched = False
-
-    def fetch(_language: str, _url: str) -> ProblemMetadata:
-        nonlocal fetched
-        fetched = True
-        return metadata()
-
-    with pytest.raises(LeetError, match="clean"):
-        scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=fetch, run=git)
-
-    assert not fetched
-    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
+    unrelated = tmp_path / "notes.txt"
+    unrelated.write_text("keep me")
+    result = scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: metadata(), run=git)
+    assert result.source_path.is_file()
+    assert unrelated.read_text() == "keep me"
+    assert git.current_branch == "main"
 
 
-def test_worktree_is_rechecked_after_metadata_fetch(tmp_path: Path) -> None:
+@pytest.mark.parametrize("branch", ["feature/example", ""])
+def test_start_requires_main_before_fetch(tmp_path: Path, branch: str) -> None:
+    git = FakeGit(tmp_path)
+    git.current_branch = branch
+    with pytest.raises(LeetError, match="main"):
+        scaffold_from_url(
+            tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: pytest.fail("must not fetch"), run=git
+        )
+
+
+def test_branch_is_rechecked_after_fetch(tmp_path: Path) -> None:
     git = FakeGit(tmp_path)
 
-    def fetch(_language: str, _url: str) -> ProblemMetadata:
-        git.dirty = True
+    def fetch(*_):
+        git.current_branch = "another"
         return metadata()
 
-    with pytest.raises(LeetError, match="clean"):
+    with pytest.raises(LeetError, match="main"):
         scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=fetch, run=git)
-
-    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
-
-
-def test_existing_branch_or_problem_stops_before_checkout(tmp_path: Path) -> None:
-    branch_git = FakeGit(tmp_path, branch_exists=True)
-    with pytest.raises(LeetError, match="branch already exists"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=branch_git,
-        )
-
-    problem_git = FakeGit(tmp_path)
-    existing = tmp_path / "src" / "typescript" / "p_0035_existing"
-    existing.mkdir(parents=True)
-    with pytest.raises(LeetError, match="problem ID already exists"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=problem_git,
-        )
-    assert not any(call[:3] == ("git", "switch", "-c") for call in problem_git.calls)
+    assert not (tmp_path / "src").exists()
 
 
-def test_existing_remote_branch_stops_before_checkout(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path, remote_branch_exists=True)
+def test_reopens_offline_without_overwriting_source_or_tests(tmp_path: Path) -> None:
+    git = FakeGit(tmp_path)
+    first = scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: metadata(), run=git)
+    first.source_path.write_text(first.source_path.read_text() + "// my solution\n")
+    first.test_path.write_text("// my tests\n")
+    original = first.source_path.read_text()
+    reopened = scaffold_from_url(
+        tmp_path,
+        "ts",
+        PROBLEM_URL,
+        fetch=lambda *_: pytest.fail("offline reopen should not fetch"),
+        run=git,
+    )
+    assert reopened.reopened
+    assert first.source_path.read_text() == original
+    assert first.test_path.read_text() == "// my tests\n"
 
-    with pytest.raises(LeetError, match="branch already exists on a remote"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=git,
-        )
 
-    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
+def test_reopens_remembered_legacy_source_without_fetch(tmp_path: Path) -> None:
+    git = FakeGit(tmp_path)
+    first = scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: metadata(), run=git)
+    first.source_path.write_text("// legacy source without a URL\n")
+    reopened = scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: metadata(), run=git)
+    assert reopened.reopened
+    assert first.source_path.read_text() == "// legacy source without a URL\n"
 
 
-def test_scaffold_failure_restores_and_deletes_new_branch(tmp_path: Path) -> None:
+def test_scaffold_failure_leaves_branch_alone(tmp_path: Path) -> None:
     git = FakeGit(tmp_path)
 
-    def fail_scaffold(*_arguments: object, **_keywords: object) -> tuple[Path, Path, str]:
+    def fail(*_args, **_kwargs):
         raise OSError("disk full")
 
     with pytest.raises(LeetError, match="disk full"):
         scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=git,
-            creator=fail_scaffold,
+            tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: metadata(), run=git, creator=fail
         )
-
     assert git.current_branch == "main"
-    assert git.calls[-2:] == [
-        ("git", "switch", "main"),
-        ("git", "branch", "-D", "feat/p-0035-search-insert-position"),
-    ]
+    assert not any(call[:2] == ("git", "switch") for call in git.calls)
 
 
 def test_parses_concise_command_and_prints_success(
@@ -485,10 +469,9 @@ def test_parses_concise_command_and_prints_success(
     assert lc.main(["ts", PROBLEM_URL]) == 0
     output = capsys.readouterr().out
     assert "Signature: searchInsert" in output
-    assert "Branch: feat/p-0035-search-insert-position" in output
     assert "lc test" in output
-    assert "lc watch" in output
-    assert "lc ready" in output
+    assert "lc live" in output
+    assert "lc done" in output
 
 
 def test_help_prints_usage_and_succeeds(capsys: pytest.CaptureFixture[str]) -> None:
@@ -497,4 +480,4 @@ def test_help_prints_usage_and_succeeds(capsys: pytest.CaptureFixture[str]) -> N
     assert output.startswith("lc — the local LeetCode workflow\n")
     assert "lc URL" in output
     assert "lc test" in output
-    assert "lc ready" in output
+    assert "lc done" in output

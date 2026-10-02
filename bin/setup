@@ -38,6 +38,8 @@ fi
 
 # Install independently and accept an already-correct Python before invoking mise's backend.
 mise -C "$REPOSITORY_ROOT" install node
+JUDGE_NODE=$(sed -n '1p' "$REPOSITORY_ROOT/.judge-node-version")
+mise -C "$REPOSITORY_ROOT" install "node@$JUDGE_NODE"
 mise -C "$REPOSITORY_ROOT" install npm:pnpm
 mise -C "$REPOSITORY_ROOT" install uv
 EXPECTED_PYTHON=$(sed -n '1p' "$REPOSITORY_ROOT/.python-version")
@@ -57,4 +59,5 @@ fi
 # converge on the same project state.
 mise -C "$REPOSITORY_ROOT" exec -- pnpm install --frozen-lockfile
 mise -C "$REPOSITORY_ROOT" exec -- uv sync --frozen
+mise -C "$REPOSITORY_ROOT" exec -- uv run playwright install chromium
 mise -C "$REPOSITORY_ROOT" exec -- pnpm prepare
