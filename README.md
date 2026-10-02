@@ -1,368 +1,209 @@
 # LeetCode solutions
 
-A local TypeScript and Python workspace for solving LeetCode problems, reproducing failed
-submissions, and validating examples and edge cases before submitting again.
+TypeScript and Python solutions, with tests beside each problem. The everyday workflow is:
+**start → solve → `lc done`**. Work stays on `main`.
 
-Each problem keeps its implementation next to its tests. The repository pins its complete
-toolchain, provides a safe scaffold for new problems, and exposes the complete day-to-day
-workflow through one `lc` command.
+## Setup
 
-## Repository layout
+Install and activate [mise](https://mise.jdx.dev/getting-started.html), then run:
 
-```text
-src/
-├── python/
-│   └── p_####_<slug>/
-│       ├── p_####_<slug>.py
-│       └── test_p_####_<slug>.py
-└── typescript/
-    ├── data_structures/
-    ├── judge-types.d.ts
-    └── p_####_<slug>/
-        ├── p_####_<slug>.ts
-        └── p_####_<slug>.test.ts
-bin/
-└── lc
-scripts/
-├── check_incomplete.py
-├── doctor.py
-├── lc.py
-├── new_problem.py
-├── problem_paths.py
-├── submission.py
-└── test_one.py
-tests/
-└── test_*.py
-```
-
-Problem numbers are zero-padded to four digits. Shared TypeScript helpers belong in
-`src/typescript/data_structures/`; ambient declarations for types supplied by the judge belong in
-`src/typescript/judge-types.d.ts`. Reusable Python helpers should remain explicit and close to
-their consumers unless several solutions genuinely share them.
-
-## Toolchain
-
-`.node-version` pins Node.js, `package.json`'s `packageManager` pins pnpm, and `mise.toml` pins the
-remaining project tools. The global mise configuration supplies pnpm through its idiomatic
-version-file support; pnpm is intentionally not duplicated in `mise.toml`:
-
-| Tool | Version | Purpose |
-| --- | ---: | --- |
-| Node.js | 26.7.0 | TypeScript runtime and tooling |
-| pnpm | 11.20.0 | JavaScript package manager and task runner (`package.json`) |
-| Python | 3.14.7 | Python solutions and repository scripts (`mise.toml`) |
-| uv | 0.12.2 | Python environment and dependency management (`mise.toml`) |
-
-TypeScript uses Vitest for tests and Biome for linting and formatting. Python uses pytest for
-tests and Ruff for linting and formatting. TypeScript dependencies are locked in
-`pnpm-lock.yaml`; Python dependencies are locked in `uv.lock`.
-
-The local TypeScript compiler and Node.js tooling stay independently pinned, while solution code
-targets ES2024 to match the language target documented by LeetCode's TypeScript judge. See
-[LeetCode's current language environments](https://support.leetcode.com/hc/en-us/articles/360011833974-What-are-the-environments-for-the-programming-languages).
-
-Keep this repository in the WSL filesystem, for example `~/prj/leetcode`, rather than under
-`/mnt/c`. Git, dependency installation, test discovery, and file watching are substantially
-faster on ext4.
-
-## Initial setup
-
-Install and activate `mise` for your shell using its
-[official getting-started guide](https://mise.jdx.dev/getting-started.html), then run from the
-repository root:
-
-```bash
-mise settings add idiomatic_version_file_enable_tools node
-mise settings add idiomatic_version_file_enable_tools pnpm
-mise trust
-mise install
-pnpm install --frozen-lockfile
-uv sync --frozen
-pnpm prepare
-```
-
-`pnpm prepare` installs the Lefthook pre-commit hook explicitly. The hook runs
-`mise exec -- pnpm ready`, so commits use the repository's pinned tools even if the interactive
-shell has different global versions. Run `pnpm prepare` again if `lc doctor` reports a missing
-generated hook.
-
-Once `mise` is activated in the shell and this repository is trusted, its configuration adds
-`bin/` to `PATH`. That makes the repository-local `lc` command available from the repository and
-its subdirectories without a global installation.
-
-These are the first-time project-tooling exceptions to the `lc` workflow: `mise`, pnpm, uv, and the
-Git hook must exist before the repository-local command can run. Normal Git commit, push, and pull
-operations also remain regular Git commands.
-
-Verify the workspace after `lc` is available:
-
-```bash
+```sh
+./bin/setup --trust
 lc doctor
 ```
 
-Confirm the active tools when troubleshooting setup:
+Setup installs the pinned tools, synchronizes the locked dependencies, installs Chromium for
+Playwright, and installs the existing Git hook. It is safe to repeat. `mise.toml` adds `bin/`
+to your path inside this repository; `./bin/lc` also works directly.
 
-```bash
-mise current
-node --version
-pnpm --version
-python --version
-uv --version
-```
-
-### VS Code and WSL
-
-Open the repository through VS Code's WSL support, accept the workspace extension
-recommendations, and use `${workspaceFolder}/.venv` as the Python interpreter. The Testing view
-then provides pytest and Vitest run/debug controls. Workspace tasks also expose new-problem
-scaffolding, current-test-file runs, watch mode, formatting, and the complete `ready` gate.
-
-## `lc` command reference
-
-Run `lc`, `lc help`, or `lc --help` to display the built-in reference. `lc COMMAND --help` displays
-the same reference without starting the command. Both `ts`/`typescript` and `py`/`python` are
-accepted as language names. URL scaffolds and explicit problem IDs default to TypeScript. Test
-paths infer their language from the extension, while commands without a target use the detected
-problem language.
-
-### Create problems
-
-| Command | Behavior |
+| Tool | Pin |
 | --- | --- |
-| `lc URL` | Fetch metadata, create and check out the problem branch, then scaffold TypeScript |
-| `lc py URL` | Run the same automatic workflow for Python |
-| `lc new URL` | Explicit spelling of the automatic TypeScript URL workflow |
-| `lc new [LANG] ID TITLE...` | Create a manual, file-only scaffold; accepts `--url URL` and `--signature SIGNATURE` |
+| Node.js | `.node-version` / `mise.toml` |
+| LeetCode judge Node.js | `.judge-node-version` |
+| pnpm | `package.json` / `mise.toml` |
+| Python and uv | `mise.toml` |
+| Vitest, Biome, TypeScript, Lefthook | `package.json` / `pnpm-lock.yaml` |
+| pytest, Ruff, Python Playwright | `pyproject.toml` / `uv.lock` |
 
-The automatic URL workflow requires a clean worktree and creates `feat/p-####-slug`. It refuses
-duplicate IDs or branches and rolls the branch back if file generation fails. The manual workflow
-does not perform Git operations.
+## Start, solve, finish
 
-### Test and submit
+Run `lc` for a numbered menu. It shows the active problem and language and lets you start,
+select, test, submit, or copy a solution. Choose **Done** explicitly to submit; pressing Enter
+alone redisplays the menu.
 
-| Command | Behavior |
-| --- | --- |
-| `lc test` | Test the current problem; run all TypeScript and Python tests if none is detected |
-| `lc test ID` | Test one TypeScript problem |
-| `lc test LANG ID` | Test one problem in the selected language |
-| `lc test LANG` | Run the complete suite for one language |
-| `lc test PATH` | Infer the language from `.ts` or `.py` and test that file |
-| `lc test all` / `lc test-all` | Run all TypeScript and Python tests explicitly |
-| `lc test --watch` / `lc watch` | Watch the current TypeScript problem; watch all TypeScript tests if none is detected |
-| `lc watch ID` / `lc watch PATH` | Watch one TypeScript problem or test file |
-| `lc submit [LANG] [ID]` | Print judge-ready source; use the current problem when the ID is omitted |
-| `lc submit [LANG] [ID] --copy` | Print the submission and copy it to the system clipboard |
-| `lc copy [LANG] [ID]` | Short, readable form of `lc submit ... --copy` |
-
-Relative test paths are resolved from the directory where `lc` was invoked, even though commands
-run with the repository root as their working directory. Watch mode is intentionally TypeScript
-only. Submission output remains clean so it can be redirected or pasted directly into LeetCode.
-
-### Check the project
-
-| Command | Behavior |
-| --- | --- |
-| `lc ready` | Reject incomplete scaffolds, then run the complete quality gate |
-| `lc check` | Check formatting, lint, TypeScript types, and all tests |
-| `lc format [LANG]` | Apply Biome and/or Ruff formatting |
-| `lc format [LANG] --check` | Check formatting without changing files |
-| `lc format check` / `lc format-check [LANG]` | Alternative spellings of the read-only format check |
-| `lc lint [LANG]` | Run both linters or only the selected language's linter |
-| `lc typecheck` | Type-check TypeScript without emitting files |
-| `lc incomplete` | Report untouched generated markers |
-| `lc doctor` | Verify pinned tools, dependencies, and the Git-hook installation |
-
-`lc format` is the only mutating quality command. The other quality commands are read-only.
-Failures from the underlying test and quality tools keep their original exit status.
-
-### Detection and aliases
-
-For commands with an optional problem ID, `lc` detects context in this order:
-
-1. A problem directory containing the shell's original working directory.
-2. A strict current branch named `feat/p-####-slug` with a matching local problem directory.
-3. No current problem. `lc test` then runs all tests, while `lc submit` asks for an ID.
-
-An explicit language or ID always wins. If a detected branch has both language implementations,
-TypeScript wins because it is the project default.
-
-| Short form | Full command |
-| --- | --- |
-| `lc t` | `lc test` |
-| `lc w` | `lc watch` |
-| `lc s` | `lc submit` |
-| `lc r` | `lc ready` |
-| `lc c` | `lc check` |
-| `lc fmt` / `lc f` | `lc format` |
-| `lc fc` | `lc format-check` |
-| `lc n` / `lc add` / `lc a` | `lc new` |
-| `lc d` | `lc doctor` |
-| `lc types` | `lc typecheck` |
-
-The longer compatibility spelling `lc submission` also maps to `lc submit`. The underlying pnpm
-scripts remain available as low-level interfaces for automation or unusual runner arguments, but
-normal interactive use should require only `lc`.
-
-## Solve a problem
-
-### 1. Read the contract
-
-Before writing code, record:
-
-- the exact function, method, or class signature;
-- input constraints and important boundaries;
-- whether the input may be mutated;
-- whether output order matters;
-- the expected time and auxiliary-space complexity.
-
-Use every supplied example as a test, then add focused cases for empty or singleton inputs,
-duplicates, zero, negative values, boundaries, and mutation semantics when the contract permits
-them.
-
-### 2. Create a problem with `lc`
-
-```bash
-lc https://leetcode.com/problems/search-insert-position/  # TypeScript by default
+```sh
+lc new
+# Or start directly (TypeScript is the default):
+lc https://leetcode.com/problems/search-insert-position/
 lc py https://leetcode.com/problems/search-insert-position/
-```
 
-`lc` is the preferred new-problem workflow. It fetches official LeetCode metadata, including
-the ordinary-function signature, creates `feat/p-####-slug` from the current clean `HEAD`, checks
-out that branch, then scaffolds the solution and test files.
-
-It requires the setup above, a clean Git worktree, and network access to LeetCode. It deliberately
-refuses to create a branch over uncommitted work. The automatic signature workflow currently
-supports ordinary functions with self-contained signatures. Use the manual flow below for
-design-class problems (constructors and operation sequences), signatures that need extra custom
-type declarations, or whenever metadata discovery is unavailable.
-
-### 3. Create a manual scaffold when needed
-
-```bash
-lc new 1512 "Number of Good Pairs"       # TypeScript by default
-lc new py 1512 "Number of Good Pairs"
-```
-
-Use `lc new [py|ts] ID TITLE...` when working offline, for a design-class problem, or when the
-URL workflow cannot derive the signature. It also accepts `--url URL` and `--signature SIGNATURE`
-for explicit metadata. The manual scaffold:
-
-- validates the language, number, and title;
-- creates the zero-padded problem directory and two files;
-- refuses a duplicate problem number or an existing target;
-- prints the suggested branch and focused test command;
-- performs no Git operations.
-
-Generated tests are skipped deliberately, and generated sources contain incomplete markers.
-Replace all placeholders while implementing the problem. `lc incomplete` reports any scaffold
-markers that remain.
-
-### 4. Implement the LeetCode signature
-
-Keep the local implementation close to the code submitted to LeetCode:
-
-- Python solutions normally expose the required camelCase method on `Solution`, or implement the
-  design class requested by the problem.
-- TypeScript solutions use named exports so their colocated Vitest tests can import them.
-- TypeScript solution files avoid repository imports; test and helper imports include the
-  explicit `.js` extension. Judge-provided `ListNode` and `TreeNode` types are declared ambiently.
-- Completed solutions include a concise `time: O(...)` / `space: O(...)` comment.
-
-Avoid local CLI parsing, test-only branches, or behavior that will not exist in the submitted
-solution.
-
-### 5. Run focused tests while iterating
-
-```bash
-# From a problem directory, or on its feat/p-####-slug branch
+# Edit the solution and add edge cases to its tests.
 lc test
-
-# An explicit TypeScript problem (the default language)
-lc test 1512
-
-# An explicit Python problem
-lc test py 1512
-
-# TypeScript watch mode
-lc test --watch
-lc watch
+lc live                       # TypeScript tests on each change
+lc done                       # Check, submit, commit, and push after Accepted
 ```
 
-When LeetCode reports a failing input, add it as a regression test before changing the solution.
-Confirm the test fails for the same reason, fix the implementation, then run the focused and
-complete suites.
+Starting fetches the official signature and examples. Ordinary JSON inputs with unambiguous
+return values become runnable pytest/Vitest assertions. Mutation, nodes, design classes,
+missing examples, and special judging rules get an editable skipped test with an explanation.
+Unusual APIs include the official starter as a commented reference. Complete the solution,
+replace skipped templates, and fill in its time/space complexity before finishing.
 
-`lc test` identifies the current problem from the caller's problem directory or a strict
-`feat/p-####-slug` branch. Outside either context, it runs the full TypeScript and Python suite.
+Starting an existing problem activates its files without overwriting them. Known URLs reopen
+without network access; official URLs for legacy files are remembered in `.lc/problems/`.
+Starting requires `main`; unrelated working files are preserved.
 
-### 6. Run the quality gate
+### Commands
 
-```bash
-lc ready
-```
-
-`lc ready` first rejects untouched scaffold markers, then checks formatting, linting,
-TypeScript types, and both test suites. It is the preferred command before committing or
-submitting.
-
-Use narrower commands when diagnosing a failure:
-
-| Command | Purpose |
+| Command | Action |
 | --- | --- |
-| `lc test [LANG] [ID\|PATH]` | Test the current problem or all tests; explicit IDs default to TypeScript |
-| `lc test --watch` / `lc watch [ID\|PATH]` | Watch the current TypeScript problem or a TypeScript file |
-| `lc submit [LANG] [ID] [--copy]` | Render judge-ready source |
-| `lc copy` | Render and copy the current solution |
-| `lc incomplete` | Find untouched scaffold markers |
-| `lc format [LANG] [--check]` | Apply formatting, or check without modifying files |
-| `lc lint [LANG]` | Run linting |
-| `lc typecheck` | Run TypeScript without emitting files |
-| `lc check` | Run formatting checks, linting, types, and tests |
-| `lc ready` | Require complete scaffolds, then run `lc check` |
-| `lc doctor` | Verify tools, dependencies, and the Git-hook installation |
+| `lc` | Active problem and guided menu |
+| `lc new` | Ask for a problem URL and language |
+| `lc URL` / `lc py URL` | Start or reopen a problem |
+| `lc list [ts\|py] URL` | Import a LeetCode practice list |
+| `lc list` / `lc list --refresh` | Show the list or refresh it from LeetCode |
+| `lc next [ts\|py]` | Start or reopen the next unsolved problem |
+| `lc test [ts\|py] [ID\|PATH]` | Test one problem; all tests when no problem is detected |
+| `lc live [ID\|PATH]` | Watch TypeScript tests |
+| `lc done [ts\|py] [ID]` | Check, submit, commit, push |
+| `lc login [--check]` | Import or validate a cookie session |
+| `lc logout` | Remove saved local credentials |
+| `lc copy [ts\|py] [ID]` | Check and copy judge-ready source |
+| `lc show [ts\|py] [ID]` | Check and print judge-ready source |
+| `lc help [COMMAND]` | General or command-specific help |
 
-Review changes after any formatting command:
+Targets resolve in this order: explicit arguments, the caller's problem directory, remembered
+selection in ignored `.lc/active.json`, then a legacy `feat/p-####-*` branch. A language alone
+with `lc test ts` or `lc test py` retains the existing whole-language test behavior.
 
-```bash
-git diff --check
-git diff
-git status --short
+Runner arguments after `--` pass through unchanged:
+
+```sh
+lc test py 35 -- -k boundary
+lc test -- -t 'example'        # Vitest test-name filter
+lc test all                   # All languages
+lc test py all -- -x           # All Python tests, stop after a failure
 ```
 
-### 7. Submit and save the accepted solution
+`watch` aliases `live`; `submit` and `submission` retain their source-printing behavior as
+aliases of `show`. `finish` aliases `done`. Older shortcuts still work: `t`, `w`, `s`, `r`, `c`,
+`fmt`, `f`, `fc`, `n`, `add`, `a`, `d`, and `types`. Scripts can keep using the `pnpm` interfaces.
+Noninteractive commands never wait for input; `lc new` needs a URL when stdin is not a terminal.
 
-Render the exact source intended for the judge:
+For an offline scaffold:
 
-```bash
-lc submit ts 268
-lc submit py 1512 --copy
-# Or, from the current problem:
-lc copy
+```sh
+lc new py 35 Search Insert Position \
+  --url https://leetcode.com/problems/search-insert-position/ \
+  --signature 'searchInsert(self, nums: list[int], target: int) -> int'
 ```
 
-The TypeScript renderer removes supported top-level module exports and refuses module imports,
-CommonJS module syntax, triple-slash references, or unsupported export forms rather than
-guessing. Python source is emitted unchanged. Always preserve the exact signature expected by
-the judge.
+### What `lc done` does
 
-After acceptance:
+1. Display the target, require `main`, and reject unrelated staged changes.
+2. Format only the current problem, then run `lc ready`: unfinished-scaffold detection,
+   formatting checks, linters, TypeScript checking, judge compatibility, and the complete test suite.
+3. Render the solution and submit it to LeetCode over HTTP using the saved cookie session.
+4. Wait for Accepted. A rejection leaves your work uncommitted so you can fix it.
+5. Stage only this problem, commit (for example, `feat(0035): search insert position`), and push
+   the saved commit to `origin/main`. The commit hook runs as usual. There is no PR step.
 
-1. Keep any regression tests discovered while debugging.
-2. Confirm the complexity comment matches the final algorithm.
-3. Run `lc ready` again.
-4. Commit the focused problem directory and push the branch.
+The verdict includes a submission link and any runtime, memory, passed-test count, or percentile
+that LeetCode returns. These metrics are saved locally and shown again when resuming a failed
+commit or push. Missing metrics are omitted.
 
-```bash
-git add src/typescript/p_1512_number_of_good_pairs
-git commit -m "feat(1512): number of good pairs"
-git push -u origin HEAD
+Before your first submission, run `lc login` in a local terminal and follow its numbered steps:
+
+1. Sign in at `https://leetcode.com/` in your normal browser and check for your account avatar.
+2. Right-click the page → Inspect. In Chrome or Edge, open Application → Storage → Cookies →
+   `https://leetcode.com`. Firefox uses the Storage tab → Cookies.
+3. Copy the **Value** of `LEETCODE_SESSION` into the first terminal prompt and press Enter.
+4. Copy the **Value** of `csrftoken` into the second prompt and press Enter.
+
+Paste values without names or quotes. Input stays invisible while you paste. If
+`LEETCODE_SESSION` is missing, finish account sign-in and reload the page; completing a
+Cloudflare challenge alone does not sign you in. Clear any cookie-table filter between lookups.
+
+Keep cookies in the local terminal, outside chat, command arguments, and piped stdin. The
+command validates the session and saves only those two cookies in ignored `.lc/session.json`
+(unencrypted, mode `0600`, with `.lc/` mode `0700`). The first prompt also accepts a complete
+Cookie header for compatibility with the earlier login instructions.
+
+Run `lc login --check` to validate the saved session without prompts or opening a browser.
+Run `lc logout` to remove local credentials; it does not sign out your website session.
+Expired sessions and site challenges require interaction in your normal browser followed by
+`lc login` again. Cookie import does not guarantee that LeetCode will allow HTTP requests.
+Keep `.lc/` private: it contains credentials and local workflow state.
+
+Use `lc done --browser` for the dedicated Playwright fallback. It reuses the persistent profile
+in `.lc/browser/`; complete its login or challenges yourself. Noninteractive submissions fail
+promptly when interaction is needed. Both backends preserve the recovery workflow below, and
+an uncertain submission POST is never automatically retried.
+
+### Interrupted submissions and saving
+
+Run `lc done` again after a timeout, failed commit, or failed push. The journal in
+`.lc/submissions/` records source hashes, submission IDs, verdicts, and saved commits. Retries
+resume judging or saving without submitting accepted code again. Changes to the source while
+judging prevent saving different code. Restore the submitted source before resuming that attempt.
+
+An interrupted submission POST without a known ID has an uncertain outcome. Check your
+LeetCode submission history, then use:
+
+```sh
+lc done --resume SUBMISSION_ID
 ```
 
-Use the equivalent Python path for a Python solution. A pull request should link the problem,
-summarize the algorithm and complexity, and record the validation command.
+This checks the remote submission's problem, language, and source before resuming. If history
+confirms no submission was created, explicitly run `lc done --retry-uncertain`. Do not remove
+the journal to retry: it is what prevents accidental duplicate submissions.
 
-GitHub Actions runs the same frozen setup and quality gate for pushes and pull requests to `main`.
+### Practice from a list
 
-## License
+Copy a LeetCode **problem list** URL, then run:
 
-This repository is licensed under the terms in [LICENSE](LICENSE).
+```sh
+lc list https://leetcode.com/problem-list/wpwgkgt/
+lc next
+# Solve the opened problem, then:
+lc done
+lc next
+```
+
+Use `lc list py URL` to practice in Python. Importing saves one list in website order; it does
+not create every problem's files. `lc next` opens the first unsolved problem and uses the usual
+scaffold and examples. Running it again before Accepted reopens that same problem unchanged.
+
+`lc list` shows progress. Accepted submissions in either language count as solved, combining
+LeetCode's status at import with the local submission journal. Run `lc list --refresh` after
+solving on the website or changing a list, including a Smart List whose contents have changed.
+Import and refresh use your saved `lc login` session. The snapshot lives in ignored
+`.lc/practice.json`; your lists on LeetCode are unchanged. Study Plan URLs are not supported.
+Premium questions remain in the list, but automatic scaffolding currently supports free problems.
+
+## Helpers and layout
+
+Problems use `src/typescript/p_####_<slug>/` or `src/python/p_####_<slug>/`, with matching source
+and test filenames. Some older problems retain their original numeric padding/test names.
+Workflow code lives in `scripts/`; workflow tests live in `tests/`.
+
+The [list and tree reference](docs/data-structures.md) links matching TypeScript/Python node
+classes and conversion functions. Nodes are separate from test helpers. Solutions use
+LeetCode's judge-provided types; conversion helpers stay in tests.
+
+## Quality commands
+
+- `lc ready`: require completed scaffolds, then run every check. Used by the commit hook and CI.
+- `lc check`: formatting, lint, types, judge compatibility, and tests, allowing unfinished scaffolds.
+- `lc format [ts|py] [--check]`, `lc lint [ts|py]`, `lc typecheck`: individual checks.
+- `lc incomplete`: list unfinished scaffolds.
+- `lc doctor`: inspect the pinned tools, dependencies, and hook installation.
+
+`pnpm judge:check` checks rendered TypeScript submissions with TypeScript 5.7.3 and runs the
+TypeScript tests under Node 22.14.0, matching the versions in
+[LeetCode's language environment guide](https://support.leetcode.com/hc/en-us/articles/360011833974-What-are-the-environments-for-the-programming-languages).
+It runs automatically in `lc check`, `lc ready`, and `lc done`. Repository tooling keeps its
+newer versions. The check covers your local tests and the bundled judge node types; LeetCode's
+hidden tests and other judge-provided libraries still require a real submission.
+
+See [CLAUDE.md](CLAUDE.md) for project conventions.

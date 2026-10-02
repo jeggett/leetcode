@@ -227,10 +227,19 @@ def render_python_solution(
 ) -> str:
     """Render a syntactically valid Python solution placeholder."""
     url_comment = f"# Problem URL: {problem_url}" if problem_url else "# TODO: add problem URL"
+    node_annotation = (
+        "  # noqa: F821 — LeetCode provides node types"
+        if signature and re.search(r"\b(ListNode|TreeNode)\b", signature)
+        else ""
+    )
     solution_body = (
-        f"    def {signature}:\n        raise NotImplementedError\n" if signature else "    pass\n"
+        f"    def {signature}:{node_annotation}\n        raise NotImplementedError\n"
+        if signature
+        else "    pass\n"
     )
     return f'''"""LeetCode {problem_id}."""
+
+from __future__ import annotations
 
 # Problem: {title}
 {url_comment}
@@ -469,13 +478,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[1]
     print(f"Created: {source_path.relative_to(root)}")
     print(f"Created: {test_path.relative_to(root)}")
-    print(f"Suggested branch: {branch}")
+    try:
+        from scripts.lc import activate_problem
+    except ModuleNotFoundError:
+        from lc import activate_problem
+    activate_problem(root, language, problem_number)
     print("Next steps:")
     normalized_id = normalize_problem_id(problem_number)
     print(f"  lc test {language} {normalized_id}")
     if language == "ts":
-        print(f"  lc watch {normalized_id}")
-    print("  lc ready")
+        print(f"  lc live {normalized_id}")
+    print("  lc done")
     return 0
 
 

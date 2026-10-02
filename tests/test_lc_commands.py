@@ -305,6 +305,7 @@ def test_main_preserves_url_scaffolding_and_delegates_manual_new(
         manual_calls.append((command, cwd))
         return 0
 
+    monkeypatch.setattr(lc, "preflight_git", lambda *_: "main")
     monkeypatch.setattr(lc, "scaffold_from_url", scaffold)
     monkeypatch.setattr(lc, "run_interactive_command", run)
 

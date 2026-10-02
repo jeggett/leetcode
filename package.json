@@ -21,12 +21,13 @@
     "format:check": "pnpm run format:check:ts && pnpm run format:check:py",
     "format:check:ts": "biome format src/typescript vitest.config.ts",
     "format:check:py": "uv run ruff format --check .",
-    "typecheck": "tsc --noEmit",
-    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run judge:check && pnpm run test",
     "ready": "pnpm run incomplete && pnpm run check",
     "ready:all": "pnpm run ready",
     "doctor": "python scripts/doctor.py",
-    "prepare": "python scripts/install_hooks.py"
+    "prepare": "python scripts/install_hooks.py",
+    "judge:check": "uv run python scripts/check_judge.py"
   },
   "repository": {
     "type": "git",
@@ -49,7 +50,8 @@
     "@biomejs/biome": "2.5.7",
     "lefthook": "2.1.10",
     "typescript": "7.0.2",
-    "vitest": "4.1.10"
+    "vitest": "4.1.10",
+    "typescript-judge": "npm:typescript@5.7.3"
   },
   "packageManager": "pnpm@11.20.0"
 }
