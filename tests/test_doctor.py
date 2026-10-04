@@ -21,6 +21,7 @@ def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None
                 "packageManager": package_manager,
                 "engines": {"node": ">=22.13.0", "pnpm": "11.20.0"},
                 "devDependencies": {
+                    "@babel/parser": "7.29.9",
                     "@biomejs/biome": "2.5.7",
                     "lefthook": "2.1.10",
                     "typescript": "5.7.3",
@@ -45,6 +46,7 @@ def write_dependencies(
     python_version: str = "9.1.1",
 ) -> None:
     node_versions = {
+        "@babel/parser": "7.29.9",
         "@biomejs/biome": "2.5.7",
         "lefthook": "2.1.10",
         "typescript": "5.7.3",

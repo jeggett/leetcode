@@ -19,7 +19,6 @@ from scripts.lc import (
     extract_python_signature,
     extract_typescript_signature,
     fetch_problem_metadata,
-    parse_arguments,
     scaffold_from_url,
 )
 
@@ -461,16 +460,6 @@ def test_scaffold_failure_restores_and_deletes_new_branch(tmp_path: Path) -> Non
 def test_parses_concise_command_and_prints_success(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    assert parse_arguments(["ts", PROBLEM_URL]) == ("ts", PROBLEM_URL)
-    assert parse_arguments(["py", PROBLEM_URL]) == ("py", PROBLEM_URL)
-    assert parse_arguments([PROBLEM_URL]) == ("ts", PROBLEM_URL)
-    with pytest.raises(LeetError, match="language"):
-        parse_arguments(["rust", PROBLEM_URL])
-    with pytest.raises(LeetError, match="usage"):
-        parse_arguments([])
-    with pytest.raises(LeetError, match="usage"):
-        parse_arguments(["py"])
-
     source = tmp_path / "src/typescript/p_0035_search_insert_position/x.ts"
     test = source.with_suffix(".test.ts")
     monkeypatch.setattr(lc, "__file__", str(tmp_path / "scripts" / "lc.py"))

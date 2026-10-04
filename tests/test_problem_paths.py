@@ -5,6 +5,7 @@ import pytest
 from scripts.problem_paths import (
     ProblemPathError,
     normalize_problem_id,
+    matching_problem_directories,
     require_source_path,
     require_test_path,
     resolve_problem_paths,
@@ -36,17 +37,6 @@ def test_resolves_one_zero_padded_problem_directory(tmp_path: Path) -> None:
     assert require_test_path(paths).is_file()
 
 
-def test_resolves_an_unpadded_legacy_problem_directory_with_a_normalized_id(tmp_path: Path) -> None:
-    directory = make_problem(tmp_path, "ts", "457", "circular_array_loop")
-
-    paths = resolve_problem_paths(tmp_path, "ts", "457")
-
-    assert paths.problem_id == "0457"
-    assert paths.directory == directory
-    assert require_source_path(paths) == directory / "p_457_circular_array_loop.ts"
-    assert require_test_path(paths) == directory / "p_457_circular_array_loop.test.ts"
-
-
 @pytest.mark.parametrize("value", ["", "0", "-2", "a", "12.3", "9" * 5000])
 def test_normalize_problem_id_rejects_invalid_values(value: str) -> None:
     with pytest.raises(ProblemPathError, match="positive integer"):
@@ -68,14 +58,6 @@ def test_rejects_ambiguous_problem_directories(tmp_path: Path) -> None:
         resolve_problem_paths(tmp_path, "ts", "1")
 
 
-def test_rejects_canonical_and_legacy_problem_directory_ambiguity(tmp_path: Path) -> None:
-    make_problem(tmp_path, "ts", "0457", "circular_array_loop")
-    make_problem(tmp_path, "ts", "457", "circular_array_loop_legacy")
-
-    with pytest.raises(ProblemPathError, match="multiple ts problem directories"):
-        resolve_problem_paths(tmp_path, "ts", "457")
-
-
 def test_requires_the_conventional_source_and_test_files(tmp_path: Path) -> None:
     directory = tmp_path / "src/python/p_0001_two_sum"
     directory.mkdir(parents=True)
@@ -87,22 +69,13 @@ def test_requires_the_conventional_source_and_test_files(tmp_path: Path) -> None
         require_test_path(paths)
 
 
-def test_resolves_one_existing_legacy_python_test_name(tmp_path: Path) -> None:
-    directory = tmp_path / "src/python/p_1512_number_of_good_pairs"
-    directory.mkdir(parents=True)
-    (directory / "p_1512_number_of_good_pairs.py").write_text("solution", encoding="utf-8")
-    legacy_test = directory / "test_1512_number_of_good_pairs.py"
-    legacy_test.write_text("test", encoding="utf-8")
+@pytest.mark.parametrize("language", ["py", "ts"])
+def test_scaffolding_and_lookup_share_the_canonical_layout(tmp_path: Path, language: str) -> None:
+    from scripts.new_problem import create_problem
 
-    paths = resolve_problem_paths(tmp_path, "py", "1512")
-
-    assert require_test_path(paths) == legacy_test
-
-
-def test_rejects_multiple_python_test_naming_conventions(tmp_path: Path) -> None:
-    make_problem(tmp_path, "py", "0001", "two_sum")
-    directory = tmp_path / "src/python/p_0001_two_sum"
-    (directory / "test_0001_two_sum.py").write_text("test", encoding="utf-8")
-
-    with pytest.raises(ProblemPathError, match="multiple solution tests"):
-        require_test_path(resolve_problem_paths(tmp_path, "py", "1"))
+    source, test, _ = create_problem(tmp_path, language, "00001", ["Two Sum"])
+    paths = resolve_problem_paths(tmp_path, language, "1")
+    assert paths.problem_id == "0001"
+    assert require_source_path(paths) == source
+    assert require_test_path(paths) == test
+    assert matching_problem_directories(paths.directory.parent, "0001") == [paths.directory]

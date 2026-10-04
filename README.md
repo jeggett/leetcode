@@ -42,9 +42,8 @@ their consumers unless several solutions genuinely share them.
 
 ## Toolchain
 
-`.node-version` pins Node.js, `package.json`'s `packageManager` pins pnpm, and `mise.toml` pins the
-remaining project tools. The global mise configuration supplies pnpm through its idiomatic
-version-file support; pnpm is intentionally not duplicated in `mise.toml`:
+`mise.toml` pins the project tools. `.node-version`, `.python-version`, and
+`package.json`'s `packageManager` retain matching versions for other tools:
 
 | Tool | Version | Purpose |
 | --- | ---: | --- |
@@ -157,6 +156,9 @@ does not perform Git operations.
 Relative test paths are resolved from the directory where `lc` was invoked, even though commands
 run with the repository root as their working directory. Watch mode is intentionally TypeScript
 only. Submission output remains clean so it can be redirected or pasted directly into LeetCode.
+
+Pass runner options after `--`, for example `lc test py 1512 -- -q` or
+`lc test 268 -- -t missing`. This also works with detected problem context.
 
 ### Check the project
 

@@ -36,14 +36,6 @@ class ProblemPaths:
             return self.directory / f"test_{self.stem}.py"
         return self.directory / f"{self.stem}.test.ts"
 
-    @property
-    def test_candidates(self) -> tuple[Path, ...]:
-        """Return canonical and, where applicable, legacy test-name candidates."""
-        if self.language != "py":
-            return (self.test_path,)
-        legacy_test = self.directory / f"test_{self.stem.removeprefix('p_')}.py"
-        return (self.test_path, legacy_test)
-
 
 def normalize_problem_id(value: str) -> str:
     """Return a positive numeric problem ID padded to at least four digits."""
@@ -68,18 +60,16 @@ def language_directory(root: Path, language: str) -> Path:
         raise ProblemPathError("language must be 'py' or 'ts'") from error
 
 
+def matching_problem_directories(directory: Path, problem_id: str) -> list[Path]:
+    """Return canonical directories for one normalized problem ID."""
+    return sorted(path for path in directory.glob(f"p_{problem_id}_*") if path.is_dir())
+
+
 def resolve_problem_paths(root: Path, language: str, problem_number: str) -> ProblemPaths:
-    """Resolve exactly one canonical or legacy problem directory for an ID and language."""
+    """Resolve exactly one canonical problem directory for an ID and language."""
     problem_id = normalize_problem_id(problem_number)
     solutions_directory = language_directory(root, language)
-    legacy_problem_id = str(int(problem_id))
-    directory_ids = {problem_id, legacy_problem_id}
-    matches = sorted(
-        path
-        for directory_id in directory_ids
-        for path in solutions_directory.glob(f"p_{directory_id}_*")
-        if path.is_dir()
-    )
+    matches = matching_problem_directories(solutions_directory, problem_id)
     if not matches:
         raise ProblemPathError(f"no {language} problem directory found for ID {problem_id}")
     if len(matches) > 1:
@@ -98,12 +88,7 @@ def require_source_path(paths: ProblemPaths) -> Path:
 
 
 def require_test_path(paths: ProblemPaths) -> Path:
-    """Return one existing colocated test path or raise a clear error."""
-    matches = [path for path in paths.test_candidates if path.is_file()]
-    if not matches:
-        candidates = ", ".join(str(path) for path in paths.test_candidates)
-        raise ProblemPathError(f"solution test is missing; expected one of: {candidates}")
-    if len(matches) > 1:
-        names = ", ".join(path.name for path in matches)
-        raise ProblemPathError(f"multiple solution tests found; choose one convention: {names}")
-    return matches[0]
+    """Return the existing canonical test path or raise a clear error."""
+    if not paths.test_path.is_file():
+        raise ProblemPathError(f"solution test is missing: {paths.test_path}")
+    return paths.test_path

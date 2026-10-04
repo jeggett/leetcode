@@ -10,7 +10,6 @@ from scripts.test_one import (
     TestOneArguments,
     TestOneError,
     focused_command,
-    parse_arguments,
     parse_invocation,
     run_focused_test,
 )
@@ -26,10 +25,9 @@ def make_test(root: Path, language: str) -> Path:
     return path
 
 
-def test_parses_test_one_arguments_for_both_watchers() -> None:
-    assert parse_arguments(["ts", "92", "--watch"]) == ("ts", "92", True)
-    assert parse_arguments(["py", "92"]) == ("py", "92", False)
-    assert parse_arguments(["py", "92", "--watch"]) == ("py", "92", True)
+def test_parses_test_one_arguments() -> None:
+    assert parse_invocation(["ts", "92", "--watch"]) == TestOneArguments("ts", "92", True)
+    assert parse_invocation(["py", "92"]) == TestOneArguments("py", "92", False)
 
 
 def test_parse_invocation_preserves_runner_arguments() -> None:
@@ -46,13 +44,12 @@ def test_parse_invocation_preserves_runner_arguments() -> None:
     [
         ([], "usage:"),
         (["go", "1"], "language"),
-        (["ts", "1", "--other"], "unknown option"),
         (["ts", "1", "--watch", "--watch"], "only be provided once"),
     ],
 )
 def test_rejects_invalid_test_one_arguments(arguments: list[str], message: str) -> None:
     with pytest.raises(TestOneError, match=message):
-        parse_arguments(arguments)
+        parse_invocation(arguments)
 
 
 def test_builds_existing_focused_runner_commands(tmp_path: Path) -> None:
@@ -61,16 +58,19 @@ def test_builds_existing_focused_runner_commands(tmp_path: Path) -> None:
 
     assert focused_command(tmp_path, "ts", "92") == [
         "pnpm",
+        "run",
         "test:ts",
         str(typescript_test.relative_to(tmp_path)),
     ]
     assert focused_command(tmp_path, "ts", "92", watch=True) == [
         "pnpm",
+        "run",
         "test:ts:watch",
         str(typescript_test.relative_to(tmp_path)),
     ]
     assert focused_command(tmp_path, "py", "92") == [
         "pnpm",
+        "run",
         "test:py",
         str(python_test.relative_to(tmp_path)),
     ]
@@ -83,39 +83,11 @@ def test_builds_existing_focused_runner_commands(tmp_path: Path) -> None:
         runner_args=("--run", "search"),
     ) == [
         "pnpm",
+        "run",
         "test:ts",
         str(typescript_test.relative_to(tmp_path)),
         "--run",
         "search",
-    ]
-
-
-def test_builds_a_focused_command_for_a_legacy_python_test_name(tmp_path: Path) -> None:
-    stem = "p_1512_number_of_good_pairs"
-    directory = tmp_path / "src/python" / stem
-    directory.mkdir(parents=True)
-    legacy_test = directory / "test_1512_number_of_good_pairs.py"
-    legacy_test.write_text("test", encoding="utf-8")
-
-    assert focused_command(tmp_path, "py", "1512") == [
-        "pnpm",
-        "test:py",
-        str(legacy_test.relative_to(tmp_path)),
-    ]
-
-
-def test_builds_a_focused_command_for_an_unpadded_legacy_typescript_directory(
-    tmp_path: Path,
-) -> None:
-    directory = tmp_path / "src/typescript/p_457_circular_array_loop"
-    directory.mkdir(parents=True)
-    test_path = directory / "p_457_circular_array_loop.test.ts"
-    test_path.write_text("test", encoding="utf-8")
-
-    assert focused_command(tmp_path, "ts", "457") == [
-        "pnpm",
-        "test:ts",
-        str(test_path.relative_to(tmp_path)),
     ]
 
 
@@ -132,6 +104,7 @@ def test_run_focused_test_uses_root_as_working_directory(tmp_path: Path) -> None
         (
             [
                 "pnpm",
+                "run",
                 "test:ts",
                 "src/typescript/p_0092_reverse_linked_list_ii/p_0092_reverse_linked_list_ii.test.ts",
             ],
@@ -176,6 +149,7 @@ raise SystemExit(13)
         == 13
     )
     assert json.loads(capture_path.read_text(encoding="utf-8")) == [
+        "run",
         "test:py",
         str(test_path.relative_to(tmp_path)),
         "--maxfail=1",

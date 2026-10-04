@@ -6,10 +6,8 @@ import pytest
 from scripts import submission
 from scripts.submission import (
     SubmissionError,
-    TypeScriptLexer,
-    clipboard_command,
+    clipboard_commands,
     copy_to_clipboard,
-    parse_arguments,
     parse_options,
     preflight_submission,
     read_submission,
@@ -27,8 +25,8 @@ def make_source(root: Path, language: str, contents: str) -> Path:
 
 
 def test_parses_submission_arguments() -> None:
-    assert parse_arguments(["py", "1"]) == ("py", "1", False)
-    assert parse_arguments(["ts", "92", "--copy"]) == ("ts", "92", True)
+    assert parse_options(["py", "1"]) == submission.SubmissionOptions("py", "1")
+    assert parse_options(["ts", "92", "--copy"]).copy is True
     options = parse_options(["ts", "92", "--copy-only", "--no-check"])
     assert options.copy is True
     assert options.copy_only is True
@@ -47,7 +45,7 @@ def test_parses_submission_arguments() -> None:
 )
 def test_rejects_invalid_submission_arguments(arguments: list[str], message: str) -> None:
     with pytest.raises(SubmissionError, match=message):
-        parse_arguments(arguments)
+        parse_options(arguments)
 
 
 def test_python_submission_is_emitted_verbatim(tmp_path: Path) -> None:
@@ -57,11 +55,11 @@ def test_python_submission_is_emitted_verbatim(tmp_path: Path) -> None:
     assert read_submission(tmp_path, "py", "1") == source
 
 
-def test_typescript_submission_reads_an_unpadded_legacy_problem_directory(tmp_path: Path) -> None:
+def test_typescript_submission_reads_a_canonical_problem_directory(tmp_path: Path) -> None:
     source = "export function solve(): number { return 1; }\n"
-    directory = tmp_path / "src/typescript/p_457_circular_array_loop"
+    directory = tmp_path / "src/typescript/p_0457_circular_array_loop"
     directory.mkdir(parents=True)
-    (directory / "p_457_circular_array_loop.ts").write_text(source, encoding="utf-8")
+    (directory / "p_0457_circular_array_loop.ts").write_text(source, encoding="utf-8")
 
     assert read_submission(tmp_path, "ts", "457") == " function solve(): number { return 1; }\n"
 
@@ -120,12 +118,14 @@ def test_typescript_submission_allows_division_after_postfix_non_null_assertion(
     assert typescript_submission(source) == source.replace("export", "", 1)
 
 
-def test_typescript_lexer_allows_regex_after_prefix_logical_not() -> None:
-    tokens = TypeScriptLexer("const matches = !/value/.test(input);\n").tokenize()
+def test_typescript_submission_preserves_regex_after_prefix_logical_not() -> None:
+    source = "export function solve(input: string) { return !/value/.test(input); }\n"
+    assert typescript_submission(source) == source.replace("export", "", 1)
 
-    assert [(token.value, token.kind) for token in tokens if token.kind == "regex"] == [
-        ("<regex>", "regex")
-    ]
+
+def test_typescript_submission_preserves_regex_after_a_block() -> None:
+    source = 'export function solve() { if (true) {} /}/.test("}"); }\n'
+    assert typescript_submission(source) == source.replace("export", "", 1)
 
 
 def test_typescript_submission_allows_templates_without_dependencies() -> None:
@@ -215,12 +215,16 @@ def test_typescript_submission_ignores_non_reference_triple_slash_comments() -> 
         ('type Helper = import("./helper.js").Helper;\n', "contains an import"),
         ("const url = import.meta.url;\n", "contains an import"),
         ("export default function solve() {}\n", "unsupported TypeScript export"),
+        ("export as namespace Library;\n", "unsupported TypeScript export"),
+        ("const answer = 1; export = answer;\n", "unsupported TypeScript export"),
+        ('module["exports"] = solve;\n', "CommonJS export"),
+        ('require?.("./helper.js");\n', "CommonJS require"),
         ("export { solve };\n", "unsupported TypeScript export"),
         ('export * from "./helper.js";\n', "unsupported TypeScript export"),
         ('export type { Input } from "./types.js";\n', "unsupported TypeScript export"),
-        ("export async class Solution {}\n", "unsupported TypeScript export"),
+        ("export async class Solution {}\n", "invalid TypeScript syntax"),
         ('const value = `${import("./helper.js")}`;\n', "contains an import"),
-        ('const value = `${import { helper } from "./helper.js"}`;\n', "contains an import"),
+        ('const value = `${import { helper } from "./helper.js"}`;\n', "invalid TypeScript syntax"),
         ('const value = `${`${import("./helper.js")}`}`;\n', "contains an import"),
         ('const helper = require("./helper.js");\n', "CommonJS require"),
         ('const helper = require("package-name");\n', "CommonJS require"),
@@ -239,25 +243,25 @@ def test_typescript_submission_rejects_dependencies_and_unsupported_exports(
 
 
 def test_clipboard_commands_cover_supported_platforms() -> None:
-    assert clipboard_command("win32") == ["clip"]
-    assert clipboard_command("darwin") == ["pbcopy"]
-    assert clipboard_command(
+    assert clipboard_commands("win32") == [["clip"]]
+    assert clipboard_commands("darwin") == [["pbcopy"]]
+    assert clipboard_commands(
         "linux", lambda command: "/bin/xclip" if command == "xclip" else None
-    ) == [
+    )[0] == [
         "xclip",
         "-selection",
         "clipboard",
     ]
-    assert clipboard_command(
-        "linux", lambda command: "/bin/xsel" if command == "xsel" else None
-    ) == [
+    assert clipboard_commands("linux", lambda command: "/bin/xsel" if command == "xsel" else None)[
+        0
+    ] == [
         "xsel",
         "--clipboard",
         "--input",
     ]
-    assert clipboard_command(
+    assert clipboard_commands(
         "linux", lambda command: "C:/Windows/System32/clip.exe" if command == "clip.exe" else None
-    ) == ["clip.exe"]
+    ) == [["clip.exe"]]
 
 
 def test_copy_to_clipboard_is_injectable_and_reports_missing_tool() -> None:
@@ -272,7 +276,7 @@ def test_copy_to_clipboard_is_injectable_and_reports_missing_tool() -> None:
 
     assert calls == [(["pbcopy"],)]
     with pytest.raises(SubmissionError, match="no supported clipboard command"):
-        clipboard_command("linux", lambda _command: None)
+        clipboard_commands("linux", lambda _command: None)
 
 
 def test_copy_to_clipboard_tries_later_linux_candidates_including_wsl() -> None:
@@ -336,7 +340,7 @@ def test_submission_preflight_requires_complete_scaffold_and_passing_focused_tes
 
     assert calls == [
         (
-            ["pnpm", "test:py", "src/python/p_0001_two_sum/test_p_0001_two_sum.py"],
+            ["pnpm", "run", "test:py", "src/python/p_0001_two_sum/test_p_0001_two_sum.py"],
             tmp_path,
             False,
         )

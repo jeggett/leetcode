@@ -13,10 +13,12 @@ with tests in `tests/`.
 
 ## Tooling and commands
 
-Install the pinned toolchain with `mise install`, JavaScript dependencies with `pnpm install`, and
-Python dependencies with `uv sync --frozen`. `.node-version` pins Node.js; `package.json` pins pnpm;
-`mise.toml` pins Python and uv. Keep mise's idiomatic pnpm version-file support enabled. TypeScript
-uses Vitest and Biome; Python uses pytest and Ruff.
+Install the pinned toolchain with `mise install`, JavaScript dependencies with
+`pnpm install`, and Python dependencies with `uv sync --frozen`. `mise.toml`
+pins Node.js, pnpm, Python, and uv; keep the version files and `package.json`
+consistent with those pins. TypeScript uses Vitest and Biome; Python uses
+pytest and Ruff. The submission renderer uses `@babel/parser` to read
+TypeScript syntax while preserving the original source text.
 
 Use `lc` as the public workflow command. `lc <leetcode-url>` fetches official metadata, creates
 `feat/p-####-slug`, and scaffolds TypeScript; add `py` before the URL for Python. The file-only
@@ -33,6 +35,10 @@ fallback is `lc new [ts|py] <number> <title...>`, with optional `--url` and `--s
   checks. Run `lc ready` before submitting.
 
 The `pnpm` scripts remain stable low-level interfaces for automation and unusual runner options.
+
+Use `lc test [ts|py] [ID|PATH] -- RUNNER_ARGS` to pass options to a focused
+runner. `scripts/problem_paths.py` owns canonical solution and test paths;
+scaffolding, current-problem detection, testing, and submission share it.
 
 ## Style and tests
 

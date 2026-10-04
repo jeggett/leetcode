@@ -11,6 +11,23 @@ import unicodedata
 from pathlib import Path
 from typing import Sequence
 
+try:
+    from scripts.problem_paths import (
+        ProblemPathError,
+        ProblemPaths,
+        language_directory,
+        matching_problem_directories,
+        normalize_problem_id,
+    )
+except ModuleNotFoundError:
+    from problem_paths import (
+        ProblemPathError,
+        ProblemPaths,
+        language_directory,
+        matching_problem_directories,
+        normalize_problem_id,
+    )
+
 
 class ScaffoldError(ValueError):
     """Raised when a scaffold request cannot be completed."""
@@ -31,21 +48,6 @@ TYPESCRIPT_RESERVED_IDENTIFIERS = frozenset(
 )
 SIGNATURE_LINE_SEPARATORS = "\r\n\u2028\u2029"
 TYPESCRIPT_FORBIDDEN_SIGNATURE_TOKENS = ("//", "/*", "*/", "#", ";", "{", "}", "=>")
-PROBLEM_DIRECTORY_NAME = re.compile(r"^p_(?P<problem_number>[0-9]+)_.+$")
-
-
-def normalize_problem_id(value: str) -> str:
-    """Return a positive numeric ID padded to at least four digits."""
-    number = value.strip().removesuffix(".")
-    if not number.isdecimal():
-        raise ScaffoldError("problem number must be a positive integer")
-    try:
-        problem_id = int(number)
-    except ValueError as error:
-        raise ScaffoldError("problem number must be a positive integer") from error
-    if problem_id <= 0:
-        raise ScaffoldError("problem number must be a positive integer")
-    return f"{problem_id:04d}"
 
 
 def slugify(title: str) -> str:
@@ -331,32 +333,10 @@ test.skip("Generated scaffold test", () => {{
 
 def build_paths(root: Path, language: str, problem_id: str, slug: str) -> tuple[Path, Path, Path]:
     """Return the target directory, source path, and test path."""
-    stem = problem_stem(problem_id, slug)
-    extension = "py" if language == "py" else "ts"
-    directory = root / "src" / ("python" if language == "py" else "typescript") / stem
-    test_name = f"test_{stem}.py" if language == "py" else f"{stem}.test.ts"
-    return directory, directory / f"{stem}.{extension}", directory / test_name
-
-
-def matching_problem_directories(language_directory: Path, problem_id: str) -> list[Path]:
-    """Return padded and legacy problem directories with the requested numeric ID."""
-    if not language_directory.is_dir():
-        return []
-
-    matches: list[Path] = []
-    for path in language_directory.iterdir():
-        if not path.is_dir():
-            continue
-        name_match = PROBLEM_DIRECTORY_NAME.fullmatch(path.name)
-        if name_match is None:
-            continue
-        try:
-            existing_problem_id = normalize_problem_id(name_match["problem_number"])
-        except ScaffoldError:
-            continue
-        if existing_problem_id == problem_id:
-            matches.append(path)
-    return sorted(matches)
+    paths = ProblemPaths(
+        language, problem_id, language_directory(root, language) / problem_stem(problem_id, slug)
+    )
+    return paths.directory, paths.source_path, paths.test_path
 
 
 def create_problem(
@@ -379,8 +359,7 @@ def create_problem(
     if signature is not None:
         signature, function_name = validate_signature(language, signature)
     directory, source_path, test_path = build_paths(root, language, problem_id, slug)
-    language_directory = directory.parent
-    existing_problems = matching_problem_directories(language_directory, problem_id)
+    existing_problems = matching_problem_directories(directory.parent, problem_id)
     if existing_problems:
         raise ScaffoldError(f"problem ID already exists: {existing_problems[0]}")
     if directory.exists():
@@ -462,7 +441,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             problem_url,
             signature,
         )
-    except (ScaffoldError, OSError) as error:
+    except (ProblemPathError, ScaffoldError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2 if str(error).startswith("usage:") else 1
 

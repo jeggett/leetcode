@@ -21,19 +21,27 @@ try:
         ScaffoldError,
         build_paths,
         create_problem,
-        matching_problem_directories,
-        normalize_problem_id,
         slugify,
         suggested_branch,
         validate_signature,
     )
+    from scripts.problem_paths import (
+        ProblemPathError,
+        matching_problem_directories,
+        normalize_problem_id,
+    )
+    from scripts.test_one import TestOneError, focused_command
 except ModuleNotFoundError:
+    from problem_paths import (
+        ProblemPathError,
+        matching_problem_directories,
+        normalize_problem_id,
+    )
+    from test_one import TestOneError, focused_command
     from new_problem import (  # type: ignore[no-redef]
         ScaffoldError,
         build_paths,
         create_problem,
-        matching_problem_directories,
-        normalize_problem_id,
         slugify,
         suggested_branch,
         validate_signature,
@@ -423,7 +431,7 @@ def fetch_problem_metadata(
     try:
         problem_id = normalize_problem_id(problem_number)
         slugify(title)
-    except ScaffoldError as error:
+    except (ProblemPathError, ScaffoldError) as error:
         raise LeetError("LeetCode returned invalid problem metadata") from error
     return ProblemMetadata(
         problem_id=problem_id,
@@ -533,26 +541,12 @@ def scaffold_from_url(
             metadata.canonical_url,
             metadata.signature,
         )
-    except (LeetError, ScaffoldError, OSError) as error:
+    except (LeetError, ProblemPathError, ScaffoldError, OSError) as error:
         rollback_error = _rollback_branch(root, original_branch, branch, run)
         if rollback_error:
             raise LeetError(f"{error}; automatic rollback failed: {rollback_error}") from error
         raise LeetError(f"could not create scaffold: {error}") from error
     return ScaffoldResult(metadata, source_path, test_path, branch)
-
-
-def parse_arguments(arguments: Sequence[str]) -> tuple[str, str]:
-    """Parse ``lc [ts|py] <problem-url>``, defaulting to TypeScript."""
-    if len(arguments) == 1:
-        if arguments[0] in {"py", "ts"}:
-            raise LeetError(USAGE)
-        return "ts", arguments[0]
-    if len(arguments) != 2:
-        raise LeetError(USAGE)
-    language, problem_url = arguments
-    if language not in {"py", "ts"}:
-        raise LeetError("language must be 'py' or 'ts'")
-    return language, problem_url
 
 
 LANGUAGE_ALIASES = {
@@ -587,7 +581,7 @@ def _canonical_language(value: str) -> str | None:
 def _normalized_problem_id(value: str) -> str:
     try:
         return normalize_problem_id(value)
-    except ScaffoldError as error:
+    except ProblemPathError as error:
         raise LcUsageError("problem ID must be a positive integer") from error
 
 
@@ -605,7 +599,9 @@ def _context_from_directory(root: Path, caller_cwd: Path) -> ProblemContext | No
         return None
     try:
         problem_id = normalize_problem_id(directory_match["problem_id"])
-    except ScaffoldError:
+    except ProblemPathError:
+        return None
+    if directory_match["problem_id"] != problem_id:
         return None
     return ProblemContext(language, problem_id, root.resolve().joinpath(*parts[:3]))
 
@@ -643,7 +639,7 @@ def detect_problem_context(
         return None
     try:
         problem_id = normalize_problem_id(branch_match["problem_id"])
-    except ScaffoldError:
+    except ProblemPathError:
         return None
     directories = _available_problem_directories(root, problem_id)
     if not directories:
@@ -712,50 +708,28 @@ def _test_command(
 
     if explicit_all:
         target = None
-        if language is None and not watch:
-            if passthrough:
-                raise LcUsageError("test-all does not accept runner arguments")
-            return ("pnpm", "run", "test")
+    elif target is None and language is None:
+        context = detect_problem_context(root, caller_cwd, git_run=git_run)
+        if context is not None:
+            language, target = context.language, context.problem_id
 
+    path: str | None = None
     if target is not None and not target.removesuffix(".").isdecimal():
-        selected_language, path = _test_path(root, caller_cwd, target, language)
-        if watch and selected_language == "py":
-            raise LcUsageError("--watch is only supported for TypeScript tests")
-        script = "test:ts:watch" if watch else f"test:{selected_language}"
-        return ("pnpm", "run", script, path, *passthrough)
+        language, path = _test_path(root, caller_cwd, target, language)
+        target = None
+    if language is None and (target is not None or watch):
+        language = "ts"
+    if watch and language == "py":
+        raise LcUsageError("--watch is only supported for TypeScript tests")
 
     if target is not None:
-        _normalized_problem_id(target)
-        if passthrough:
-            raise LcUsageError("focused ID tests do not accept runner arguments; use a test path")
-        selected_language = language or "ts"
-        if watch and selected_language == "py":
-            raise LcUsageError("--watch is only supported for TypeScript tests")
-        command = ["pnpm", "run", "test:one", selected_language, target]
-        if watch:
-            command.append("--watch")
-        command.extend(passthrough)
-        return tuple(command)
-
+        try:
+            return tuple(focused_command(root, language, target, watch, runner_args=passthrough))
+        except (ProblemPathError, TestOneError) as error:
+            raise LcUsageError(str(error)) from error
     if language is not None:
-        if watch and language == "py":
-            raise LcUsageError("--watch is only supported for TypeScript tests")
         script = "test:ts:watch" if watch else f"test:{language}"
-        return ("pnpm", "run", script, *passthrough)
-
-    context = None if explicit_all else detect_problem_context(root, caller_cwd, git_run=git_run)
-    if context is not None:
-        if passthrough:
-            raise LcUsageError("focused tests do not accept runner arguments; use a test path")
-        if watch and context.language == "py":
-            raise LcUsageError("--watch is only supported for TypeScript tests")
-        command = ["pnpm", "run", "test:one", context.language, context.problem_id]
-        if watch:
-            command.append("--watch")
-        command.extend(passthrough)
-        return tuple(command)
-    if watch:
-        return ("pnpm", "run", "test:ts:watch", *passthrough)
+        return ("pnpm", "run", script, *([path] if path else []), *passthrough)
     if passthrough:
         raise LcUsageError("all-language tests do not accept runner arguments; select ts or py")
     return ("pnpm", "run", "test")
@@ -935,7 +909,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     if not arguments or arguments[0] in {"-h", "--help", "help"}:
         print(HELP)
         return 0
-    if any(argument in {"-h", "--help"} for argument in arguments[1:]):
+    wrapper_arguments = arguments[: arguments.index("--")] if "--" in arguments else arguments
+    if any(argument in {"-h", "--help"} for argument in wrapper_arguments[1:]):
         print(HELP)
         return 0
     root = Path(__file__).resolve().parents[1]
