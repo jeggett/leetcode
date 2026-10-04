@@ -11,7 +11,7 @@ function isNotCycle(nums: number[], currentPointer: number, initialDirection: nu
     );
 }
 
-/* time: O(n), space: O(1) */
+/* time: O(n^2), space: O(1) */
 export function circularArrayLoop(nums: number[]): boolean {
     const arraySize = nums.length;
     for (let i = 0; i < arraySize; i++) {
@@ -19,7 +19,6 @@ export function circularArrayLoop(nums: number[]): boolean {
         let fastPointer = i;
         const initialDirection = nums[i];
 
-        // eslint-disable-next-line no-constant-condition
         while (true) {
             slowPointer = getNextIndex(slowPointer, nums[slowPointer], arraySize);
             if (isNotCycle(nums, slowPointer, initialDirection)) {

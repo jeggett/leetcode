@@ -31,26 +31,10 @@ VERSION_COMMANDS = {
 VERSION_PATTERN = re.compile(r"v?(\d+(?:\.\d+){0,2})")
 PACKAGE_MANAGER_PATTERN = re.compile(r"pnpm@v?(\d+(?:\.\d+){0,2})")
 
-NODE_DEPENDENCIES = ("@biomejs/biome", "typescript", "vitest", "lefthook")
+NODE_DEPENDENCIES = ("@babel/parser", "@biomejs/biome", "typescript", "vitest", "lefthook")
 PYTHON_DEPENDENCIES = ("pytest", "ruff")
-# Compatibility names retained for callers that used the original
-# representative-dependency checks.
-NODE_DEPENDENCY = "vitest"
-PYTHON_DEPENDENCY = "pytest"
-
 LEFTHOOK_CONFIG = Path("lefthook.yml")
 LEFTHOOK_COMMAND = "mise exec -- pnpm ready"
-HUSKY_HOOK_LAUNCHER_PATTERN = re.compile(
-    r"""(?mx)
-    ^\s*(?:\.|source)\s+
-    ["']?\$\(\s*dirname\b[^)\n]*\$0[^)\n]*\)/h["']?\s*$
-    """
-)
-HUSKY_LAUNCHER_NAME_PATTERN = re.compile(r"(?m)^\s*n\s*=[^\n]*\$0")
-HUSKY_LAUNCHER_PATH_PATTERN = re.compile(r"(?m)^\s*s\s*=[^\n]*\$n\b")
-HUSKY_LAUNCHER_COMMAND_PATTERN = re.compile(
-    r"""(?m)^\s*sh\s+-e\s+["']?\$s["']?\s+["']?\$@["']?\s*$"""
-)
 WSL_MOUNT_PATTERN = re.compile(r"^/mnt/[a-z](?:/|$)", re.IGNORECASE)
 
 

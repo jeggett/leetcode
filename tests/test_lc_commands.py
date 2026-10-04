@@ -17,6 +17,8 @@ def make_problem(root: Path, language: str, problem_id: str = "0035") -> Path:
     directory = root / "src" / ("python" if language == "py" else "typescript")
     directory /= f"p_{problem_id}_{slug}"
     directory.mkdir(parents=True)
+    test_name = f"test_{directory.name}.py" if language == "py" else f"{directory.name}.test.ts"
+    (directory / test_name).write_text("test", encoding="utf-8")
     return directory
 
 
@@ -81,8 +83,24 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        (("test", "35"), ("pnpm", "run", "test:one", "ts", "35")),
-        (("test", "py", "35"), ("pnpm", "run", "test:one", "py", "35")),
+        (
+            ("test", "35"),
+            (
+                "pnpm",
+                "run",
+                "test:ts",
+                "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
+            ),
+        ),
+        (
+            ("test", "py", "35"),
+            (
+                "pnpm",
+                "run",
+                "test:py",
+                "src/python/p_0035_search_insert_position/test_p_0035_search_insert_position.py",
+            ),
+        ),
         (("test", "ts"), ("pnpm", "run", "test:ts")),
         (
             (
@@ -96,7 +114,15 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
                 "src/python/p_0035_search_insert_position/test_p_0035_search_insert_position.py",
             ),
         ),
-        (("test", "ts", "35", "--watch"), ("pnpm", "run", "test:one", "ts", "35", "--watch")),
+        (
+            ("test", "ts", "35", "--watch"),
+            (
+                "pnpm",
+                "run",
+                "test:ts:watch",
+                "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
+            ),
+        ),
         (
             ("submit", "35"),
             ("uv", "run", "python", "scripts/submission.py", "ts", "35"),
@@ -122,14 +148,32 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
 def test_builds_the_documented_dispatcher_commands(
     tmp_path: Path, arguments: tuple[str, ...], expected: tuple[str, ...]
 ) -> None:
+    make_problem(tmp_path, "ts")
+    make_problem(tmp_path, "py")
     assert lc.build_command(arguments, tmp_path, tmp_path) == expected
 
 
 @pytest.mark.parametrize(
     ("arguments", "expected"),
     [
-        (("t", "35"), ("pnpm", "run", "test:one", "ts", "35")),
-        (("w", "35"), ("pnpm", "run", "test:one", "ts", "35", "--watch")),
+        (
+            ("t", "35"),
+            (
+                "pnpm",
+                "run",
+                "test:ts",
+                "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
+            ),
+        ),
+        (
+            ("w", "35"),
+            (
+                "pnpm",
+                "run",
+                "test:ts:watch",
+                "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
+            ),
+        ),
         (
             ("s", "35"),
             ("uv", "run", "python", "scripts/submission.py", "ts", "35"),
@@ -146,6 +190,8 @@ def test_builds_the_documented_dispatcher_commands(
 def test_builds_alias_commands(
     tmp_path: Path, arguments: tuple[str, ...], expected: tuple[str, ...]
 ) -> None:
+    make_problem(tmp_path, "ts")
+    make_problem(tmp_path, "py")
     assert lc.build_command(arguments, tmp_path, tmp_path) == expected
 
 
@@ -155,17 +201,14 @@ def test_uses_detected_context_for_test_submit_and_watch(tmp_path: Path) -> None
     assert lc.build_command(("test",), tmp_path, directory) == (
         "pnpm",
         "run",
-        "test:one",
-        "ts",
-        "0035",
+        "test:ts",
+        "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
     )
     assert lc.build_command(("w",), tmp_path, directory) == (
         "pnpm",
         "run",
-        "test:one",
-        "ts",
-        "0035",
-        "--watch",
+        "test:ts:watch",
+        "src/typescript/p_0035_search_insert_position/p_0035_search_insert_position.test.ts",
     )
     assert lc.build_command(("submit", "--copy"), tmp_path, directory) == (
         "uv",
@@ -348,3 +391,35 @@ def test_main_propagates_child_status_and_help_never_runs_a_child(
     assert lc.main(["help"]) == 0
     assert lc.main(["test", "--help"]) == 0
     assert calls == [(("pnpm", "run", "ready"), root)]
+
+
+def test_focused_tests_forward_runner_options_and_help(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    directory = make_problem(tmp_path, "py")
+    relative_test = f"src/python/{directory.name}/test_{directory.name}.py"
+    assert lc.build_command(("test", "py", "35", "--", "-q"), tmp_path, tmp_path) == (
+        "pnpm",
+        "run",
+        "test:py",
+        relative_test,
+        "-q",
+    )
+    monkeypatch.setattr(lc, "__file__", str(tmp_path / "scripts/lc.py"))
+    monkeypatch.setenv("LC_CALLER_CWD", str(directory))
+    calls = []
+    monkeypatch.setattr(
+        lc, "run_interactive_command", lambda command, root: calls.append(command) or 0
+    )
+    assert lc.main(["test", "--", "--help"]) == 0
+    assert calls == [("pnpm", "run", "test:py", relative_test, "--help")]
+
+
+def test_main_reports_a_missing_focused_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    directory = make_problem(tmp_path, "ts")
+    (directory / f"{directory.name}.test.ts").unlink()
+    monkeypatch.setattr(lc, "__file__", str(tmp_path / "scripts/lc.py"))
+    assert lc.main(["test", "35"]) == 2
+    assert "solution test is missing" in capsys.readouterr().err

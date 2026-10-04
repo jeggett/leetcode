@@ -1,19 +1,8 @@
-/* time: O(n^2), space: O(1) */
-const getMin = (nums: number[]): number => {
-    let currentMinIndex = 0;
-    for (let i = 1; i < nums.length; i++) {
-        if (nums[i] < nums[currentMinIndex]) {
-            currentMinIndex = i;
-        }
-    }
-    return nums.splice(currentMinIndex, 1)[0];
-};
-
+/* time: O(n log n), space: O(n) for sorting */
 export function numberGame(nums: number[]): number[] {
-    const result: number[] = [];
-    while (nums.length > 0) {
-        result.push(...[getMin(nums), getMin(nums)].reverse());
+    nums.sort((left, right) => left - right);
+    for (let index = 0; index < nums.length; index += 2) {
+        [nums[index], nums[index + 1]] = [nums[index + 1], nums[index]];
     }
-
-    return result;
+    return nums;
 }

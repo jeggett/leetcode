@@ -11,10 +11,10 @@ export class LinkedListNode<T> {
 export class LinkedList<T> {
     public head: LinkedListNode<T> | null;
 
-    constructor(arr: T[]) {
+    constructor(arr: readonly T[]) {
         this.head = null;
-        for (const elem of arr.reverse()) {
-            this.addFirst(elem);
+        for (let index = arr.length - 1; index >= 0; index--) {
+            this.addFirst(arr[index]);
         }
     }
 
@@ -28,10 +28,6 @@ export class LinkedList<T> {
 
     addFirst(val: T) {
         const node = new LinkedListNode(val);
-        if (this.head === null) {
-            this.head = node;
-            return;
-        }
         node.next = this.head;
         this.head = node;
     }

@@ -14,13 +14,14 @@ from scripts.check_incomplete import (
 from scripts.new_problem import (
     ScaffoldError,
     create_problem,
-    normalize_problem_id,
     parse_arguments,
     slugify,
     suggested_branch,
     validate_signature,
     validate_problem_url,
 )
+
+from scripts.problem_paths import ProblemPathError, normalize_problem_id
 
 
 def test_normalization_helpers() -> None:
@@ -32,7 +33,7 @@ def test_normalization_helpers() -> None:
 
 @pytest.mark.parametrize("value", ["", "0", "-1", "12.3", "one", "9" * 5000])
 def test_rejects_invalid_problem_numbers(value: str) -> None:
-    with pytest.raises(ScaffoldError, match="positive integer"):
+    with pytest.raises(ProblemPathError, match="positive integer"):
         normalize_problem_id(value)
 
 
@@ -333,9 +334,9 @@ def test_rejects_duplicate_problem_ids_with_a_different_slug(tmp_path: Path) -> 
         create_problem(tmp_path, "py", "1", ["A", "Different", "Title"])
 
 
-def test_rejects_legacy_unpadded_problem_id_directory(tmp_path: Path) -> None:
-    legacy_directory = tmp_path / "src/typescript/p_457_circular_array_loop"
-    legacy_directory.mkdir(parents=True)
+def test_rejects_duplicate_canonical_problem_id_directory(tmp_path: Path) -> None:
+    existing_directory = tmp_path / "src/typescript/p_0457_circular_array_loop"
+    existing_directory.mkdir(parents=True)
 
     with pytest.raises(ScaffoldError, match="problem ID already exists"):
         create_problem(tmp_path, "ts", "457", ["Circular Array Loop"])

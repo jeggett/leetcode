@@ -33,21 +33,12 @@ class TestOneArguments:
     runner_args: tuple[str, ...] = ()
 
 
-def parse_arguments(arguments: Sequence[str]) -> tuple[str, str, bool]:
-    """Parse ``test_one <py|ts> <id> [--watch]``."""
-    parsed = parse_invocation(arguments)
-    if parsed.runner_args:
-        raise TestOneError(f"unknown option: {parsed.runner_args[0]}")
-    return parsed.language, parsed.problem_id, parsed.watch
-
-
 def parse_invocation(arguments: Sequence[str]) -> TestOneArguments:
     """Parse focused-test options while preserving arguments for the test runner.
 
     ``--watch`` is this wrapper's only option.  Everything after an explicit ``--``
     (or the first non-wrapper option) is passed to Vitest or pytest unchanged.  The
-    explicit separator is optional because ``lc`` removes it while dispatching the
-    package script.
+    explicit separator is optional for low-level package-script invocations.
     """
     if len(arguments) < 2:
         raise TestOneError("usage: test_one <py|ts> <id> [--watch] [-- RUNNER_ARGS...]")
@@ -86,7 +77,7 @@ def focused_command(
     paths = resolve_problem_paths(root, language, problem_id)
     test_path = require_test_path(paths)
     script = f"test:{language}:watch" if watch else f"test:{language}"
-    return ["pnpm", script, str(test_path.relative_to(root)), *runner_args]
+    return ["pnpm", "run", script, str(test_path.relative_to(root)), *runner_args]
 
 
 def run_focused_test(
