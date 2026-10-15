@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Sequence
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request
@@ -81,55 +80,6 @@ class FakeResponse:
 
     def __exit__(self, *_arguments: object) -> None:
         return None
-
-
-class FakeGit:
-    def __init__(
-        self,
-        root: Path,
-        *,
-        dirty: bool = False,
-        branch_exists: bool = False,
-        remote_branch_exists: bool = False,
-    ) -> None:
-        self.root = root
-        self.dirty = dirty
-        self.branch_exists = branch_exists
-        self.remote_branch_exists = remote_branch_exists
-        self.current_branch = "main"
-        self.calls: list[tuple[str, ...]] = []
-        self.fail_delete = False
-
-    def __call__(self, command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
-        assert cwd == self.root
-        call = tuple(command)
-        self.calls.append(call)
-        if call == ("git", "rev-parse", "--show-toplevel"):
-            return subprocess.CompletedProcess([], 0, f"{self.root}\n")
-        if call == ("git", "status", "--porcelain"):
-            return subprocess.CompletedProcess([], 0, " M work.py\n" if self.dirty else "")
-        if call == ("git", "branch", "--show-current"):
-            return subprocess.CompletedProcess([], 0, f"{self.current_branch}\n")
-        if call[:4] == ("git", "show-ref", "--verify", "--quiet"):
-            return subprocess.CompletedProcess([], 0 if self.branch_exists else 1)
-        if call == ("git", "for-each-ref", "--format=%(refname)", "refs/remotes"):
-            remote_ref = "refs/remotes/origin/feat/p-0035-search-insert-position\n"
-            return subprocess.CompletedProcess(
-                [], 0, remote_ref if self.remote_branch_exists else ""
-            )
-        if call[:3] == ("git", "switch", "-c"):
-            self.current_branch = call[3]
-            return subprocess.CompletedProcess([], 0)
-        if call[:2] == ("git", "switch"):
-            self.current_branch = call[2]
-            return subprocess.CompletedProcess([], 0)
-        if call[:3] == ("git", "branch", "-D"):
-            return (
-                subprocess.CompletedProcess([], 1, stderr="delete failed")
-                if self.fail_delete
-                else subprocess.CompletedProcess([], 0)
-            )
-        raise AssertionError(f"unexpected Git command: {call}")
 
 
 @pytest.mark.parametrize(
@@ -285,178 +235,37 @@ def test_reports_network_and_malformed_response_failures() -> None:
         )
 
 
-def test_scaffolds_on_a_new_checked_out_branch(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path)
-
+@pytest.mark.parametrize("language, signature", [("ts", TS_SIGNATURE), ("py", PY_SIGNATURE)])
+def test_url_scaffold_works_without_a_git_repository(
+    tmp_path: Path, language: str, signature: str
+) -> None:
     result = scaffold_from_url(
-        tmp_path,
-        "ts",
-        PROBLEM_URL,
-        fetch=lambda _language, _url: metadata(),
-        run=git,
+        tmp_path, language, PROBLEM_URL, fetch=lambda *_: metadata(signature)
     )
-
-    assert result.branch == "feat/p-0035-search-insert-position"
-    assert git.current_branch == result.branch
-    assert result.source_path.read_text(encoding="utf-8").startswith(
-        "// LeetCode 0035: Search Insert Position."
-    )
-    assert f"export function {TS_SIGNATURE}" in result.source_path.read_text(encoding="utf-8")
-    assert ("git", "switch", "-c", result.branch) in git.calls
-
-
-def test_scaffolds_python_with_the_normalized_official_signature(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path)
-
-    result = scaffold_from_url(
-        tmp_path,
-        "py",
-        PROBLEM_URL,
-        fetch=lambda _language, _url: metadata(PY_SIGNATURE),
-        run=git,
-    )
-
-    assert result.source_path.name == "p_0035_search_insert_position.py"
-    assert f"def {PY_SIGNATURE}:" in result.source_path.read_text(encoding="utf-8")
-    assert git.current_branch == "feat/p-0035-search-insert-position"
-
-
-def test_scaffolds_with_real_git_branch_checkout(tmp_path: Path) -> None:
-    subprocess.run(
-        ("git", "init", "-b", "main"),
-        cwd=tmp_path,
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-    marker = tmp_path / ".gitignore"
-    marker.write_text(".venv/\n", encoding="utf-8")
-    subprocess.run(("git", "add", ".gitignore"), cwd=tmp_path, check=True)
-    subprocess.run(
-        (
-            "git",
-            "-c",
-            "user.name=Leet Test",
-            "-c",
-            "user.email=lc@example.invalid",
-            "commit",
-            "-m",
-            "test: initialize repository",
-        ),
-        cwd=tmp_path,
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-
-    result = scaffold_from_url(
-        tmp_path,
-        "ts",
-        PROBLEM_URL,
-        fetch=lambda _language, _url: metadata(),
-    )
-
-    current = subprocess.run(
-        ("git", "branch", "--show-current"),
-        cwd=tmp_path,
-        capture_output=True,
-        check=True,
-        text=True,
-    )
-    assert current.stdout.strip() == result.branch
     assert result.source_path.is_file()
-
-
-def test_dirty_worktree_stops_before_network_or_branch_creation(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path, dirty=True)
-    fetched = False
-
-    def fetch(_language: str, _url: str) -> ProblemMetadata:
-        nonlocal fetched
-        fetched = True
-        return metadata()
-
-    with pytest.raises(LeetError, match="clean"):
-        scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=fetch, run=git)
-
-    assert not fetched
-    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
-
-
-def test_worktree_is_rechecked_after_metadata_fetch(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path)
-
-    def fetch(_language: str, _url: str) -> ProblemMetadata:
-        git.dirty = True
-        return metadata()
-
-    with pytest.raises(LeetError, match="clean"):
-        scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=fetch, run=git)
-
-    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
-
-
-def test_existing_branch_or_problem_stops_before_checkout(tmp_path: Path) -> None:
-    branch_git = FakeGit(tmp_path, branch_exists=True)
-    with pytest.raises(LeetError, match="branch already exists"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=branch_git,
-        )
-
-    problem_git = FakeGit(tmp_path)
-    existing = tmp_path / "src" / "typescript" / "p_0035_existing"
-    existing.mkdir(parents=True)
+    assert result.test_path.is_file()
+    assert signature in result.source_path.read_text()
+    assert not (tmp_path / ".git").exists()
     with pytest.raises(LeetError, match="problem ID already exists"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=problem_git,
-        )
-    assert not any(call[:3] == ("git", "switch", "-c") for call in problem_git.calls)
+        scaffold_from_url(tmp_path, language, PROBLEM_URL, fetch=lambda *_: metadata(signature))
 
 
-def test_existing_remote_branch_stops_before_checkout(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path, remote_branch_exists=True)
-
-    with pytest.raises(LeetError, match="branch already exists on a remote"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=git,
-        )
-
-    assert not any(call[:3] == ("git", "switch", "-c") for call in git.calls)
-
-
-def test_scaffold_failure_restores_and_deletes_new_branch(tmp_path: Path) -> None:
-    git = FakeGit(tmp_path)
-
-    def fail_scaffold(*_arguments: object, **_keywords: object) -> tuple[Path, Path, str]:
-        raise OSError("disk full")
-
-    with pytest.raises(LeetError, match="disk full"):
-        scaffold_from_url(
-            tmp_path,
-            "ts",
-            PROBLEM_URL,
-            fetch=lambda _language, _url: metadata(),
-            run=git,
-            creator=fail_scaffold,
-        )
-
-    assert git.current_branch == "main"
-    assert git.calls[-2:] == [
-        ("git", "switch", "main"),
-        ("git", "branch", "-D", "feat/p-0035-search-insert-position"),
-    ]
+def test_url_scaffold_preserves_the_branch_and_uncommitted_files(tmp_path: Path) -> None:
+    subprocess.run(
+        ["git", "init", "--initial-branch=practice", str(tmp_path)], check=True, capture_output=True
+    )
+    note = tmp_path / "notes.txt"
+    note.write_text("work in progress")
+    scaffold_from_url(tmp_path, "ts", PROBLEM_URL, fetch=lambda *_: metadata())
+    branch = subprocess.run(
+        ["git", "branch", "--show-current"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert branch.stdout.strip() == "practice"
+    assert note.read_text() == "work in progress"
 
 
 def test_parses_concise_command_and_prints_success(
@@ -476,7 +285,7 @@ def test_parses_concise_command_and_prints_success(
     assert lc.main(["ts", PROBLEM_URL]) == 0
     output = capsys.readouterr().out
     assert "Signature: searchInsert" in output
-    assert "Branch: feat/p-0035-search-insert-position" in output
+    assert "Suggested branch: feat/p-0035-search-insert-position" in output
     assert "lc test" in output
     assert "lc watch" in output
     assert "lc ready" in output

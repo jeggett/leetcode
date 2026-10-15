@@ -19,10 +19,8 @@ from urllib.request import Request, urlopen
 from scripts.arguments import LANGUAGES, UsageError, parse, split_runner_args
 from scripts.new_problem import (
     ScaffoldError,
-    build_paths,
     create_problem,
     slugify,
-    suggested_branch,
     validate_signature,
 )
 from scripts.problem_paths import (
@@ -56,8 +54,8 @@ HELP = """\
 lc — the local LeetCode workflow
 
 Create:
-  lc URL                         create a TypeScript problem and branch
-  lc py URL                      create a Python problem and branch
+  lc URL                         scaffold a TypeScript problem
+  lc py URL                      scaffold a Python problem
   lc new [ts|py] ID TITLE...     create a manual scaffold (TypeScript by default)
 
 Solve:
@@ -75,7 +73,7 @@ Quality:
   lc lint [ts|py]                run linters
   lc typecheck                   type-check TypeScript
   lc incomplete                  find untouched scaffold markers
-  lc doctor                      verify the local setup
+  lc doctor                      find missing setup prerequisites
 
 Submit options: --copy, --copy-only, --no-check.
 Short aliases: t=test, w=watch, s=submit, r=ready, c=check, fmt=format.
@@ -109,7 +107,7 @@ class ProblemMetadata:
 
 @dataclass(frozen=True)
 class ScaffoldResult:
-    """Paths and branch produced by a successful URL scaffold."""
+    """Paths and a branch suggestion for a URL scaffold."""
 
     metadata: ProblemMetadata
     source_path: Path
@@ -128,7 +126,6 @@ class ProblemContext:
 
 GitRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
 ProblemFetcher = Callable[[str, str], ProblemMetadata]
-ProblemCreator = Callable[..., tuple[Path, Path, str]]
 
 
 def run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
@@ -389,98 +386,17 @@ def fetch_problem_metadata(
     )
 
 
-def _git_error(action: str, result: subprocess.CompletedProcess[str]) -> LeetError:
-    detail = (result.stderr or result.stdout or "").strip()
-    return LeetError(f"Git could not {action}{f': {detail}' if detail else ''}")
-
-
-def preflight_git(root: Path, run: GitRunner = run_command) -> str:
-    """Require the repository root, a clean worktree, and an attached branch."""
-    repository = run(("git", "rev-parse", "--show-toplevel"), root)
-    if repository.returncode != 0:
-        raise _git_error("locate the repository", repository)
-    try:
-        is_root = Path(repository.stdout.strip()).resolve() == root.resolve()
-    except OSError:
-        is_root = False
-    if not is_root:
-        raise LeetError("lc must run for this repository's root worktree")
-
-    status = run(("git", "status", "--porcelain"), root)
-    if status.returncode != 0:
-        raise _git_error("inspect the worktree", status)
-    if status.stdout.strip():
-        raise LeetError("worktree must be clean before creating a problem branch")
-
-    current = run(("git", "branch", "--show-current"), root)
-    if current.returncode != 0:
-        raise _git_error("read the current branch", current)
-    branch = current.stdout.strip()
-    if not branch:
-        raise LeetError("cannot create a problem branch from a detached HEAD")
-    return branch
-
-
-def _require_new_branch(root: Path, branch: str, run: GitRunner) -> None:
-    existing = run(("git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"), root)
-    if existing.returncode == 0:
-        raise LeetError(f"branch already exists: {branch}")
-    if existing.returncode != 1:
-        raise _git_error("check the target branch", existing)
-
-    remote_refs = run(("git", "for-each-ref", "--format=%(refname)", "refs/remotes"), root)
-    if remote_refs.returncode != 0:
-        raise _git_error("check remote target branches", remote_refs)
-    remote_suffix = f"/{branch}"
-    if any(ref.strip().endswith(remote_suffix) for ref in remote_refs.stdout.splitlines()):
-        raise LeetError(f"branch already exists on a remote: {branch}")
-
-
-def _require_new_problem(root: Path, language: str, metadata: ProblemMetadata) -> None:
-    slug = slugify(metadata.title)
-    directory, _, _ = build_paths(root, language, metadata.problem_id, slug)
-    existing = matching_problem_directories(directory.parent, metadata.problem_id)
-    if existing:
-        raise LeetError(f"problem ID already exists: {existing[0]}")
-    if directory.exists():
-        raise LeetError(f"target already exists: {directory}")
-
-
-def _rollback_branch(root: Path, original: str, created: str, run: GitRunner) -> str | None:
-    switched = run(("git", "switch", original), root)
-    if switched.returncode != 0:
-        return str(_git_error(f"restore branch {original!r}", switched))
-    deleted = run(("git", "branch", "-D", created), root)
-    if deleted.returncode != 0:
-        return str(_git_error(f"delete rolled-back branch {created!r}", deleted))
-    return None
-
-
 def scaffold_from_url(
     root: Path,
     language: str,
     value: str,
     *,
     fetch: ProblemFetcher = fetch_problem_metadata,
-    run: GitRunner = run_command,
-    creator: ProblemCreator = create_problem,
 ) -> ScaffoldResult:
-    """Fetch, branch, and scaffold one problem as a single guarded workflow."""
-    canonical_url, _ = canonicalize_problem_url(value)
-    original_branch = preflight_git(root, run)
-    metadata = fetch(language, canonical_url)
-    current_branch = preflight_git(root, run)
-    if current_branch != original_branch:
-        raise LeetError("current branch changed while LeetCode metadata was loading")
-    branch = suggested_branch(metadata.problem_id, slugify(metadata.title))
-    _require_new_branch(root, branch, run)
-    _require_new_problem(root, language, metadata)
-
-    switched = run(("git", "switch", "-c", branch), root)
-    if switched.returncode != 0:
-        raise _git_error(f"create and switch to branch {branch!r}", switched)
+    """Fetch official metadata and create files without changing Git state."""
+    metadata = fetch(language, value)
     try:
-        source_path, test_path, _ = creator(
+        source_path, test_path, branch = create_problem(
             root,
             language,
             metadata.problem_id,
@@ -488,10 +404,7 @@ def scaffold_from_url(
             metadata.canonical_url,
             metadata.signature,
         )
-    except (LeetError, ProblemPathError, ScaffoldError, OSError) as error:
-        rollback_error = _rollback_branch(root, original_branch, branch, run)
-        if rollback_error:
-            raise LeetError(f"{error}; automatic rollback failed: {rollback_error}") from error
+    except (ProblemPathError, ScaffoldError, OSError) as error:
         raise LeetError(f"could not create scaffold: {error}") from error
     return ScaffoldResult(metadata, source_path, test_path, branch)
 
@@ -763,13 +676,13 @@ def _url_invocation(arguments: Sequence[str]) -> tuple[str, str] | None:
 def _print_scaffold_result(result: ScaffoldResult, root: Path, language: str) -> None:
     print(f"LeetCode {result.metadata.problem_id}: {result.metadata.title}")
     print(f"Signature: {result.metadata.signature}")
-    print(f"Branch: {result.branch}")
+    print(f"Suggested branch: {result.branch}")
     print(f"Created: {result.source_path.relative_to(root)}")
     print(f"Created: {result.test_path.relative_to(root)}")
     print("Next steps:")
-    print("  lc test")
+    print(f"  lc test {language} {result.metadata.problem_id}")
     if language == "ts":
-        print("  lc watch")
+        print(f"  lc watch {result.metadata.problem_id}")
     print("  lc ready")
 
 

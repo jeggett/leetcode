@@ -26,8 +26,8 @@ and `package.json` consistent. `pnpm prepare` installs the Git hook.
 
 Use `lc` for interactive work:
 
-- `lc URL` fetches metadata, creates a problem branch, and scaffolds
-  TypeScript. Use `lc py URL` for Python.
+- `lc URL` fetches metadata and scaffolds TypeScript. Use `lc py URL`
+  for Python. Scaffolding never changes Git state.
 - `lc new [ts|py] ID TITLE...` scaffolds files without Git or network access.
   It accepts optional `--url` and `--signature` metadata.
 - `lc test` runs the detected problem or, without context, all tests.
@@ -36,7 +36,8 @@ Use `lc` for interactive work:
 - `lc submit [ts|py] [ID]` checks and renders a submission. `lc copy`
   also copies it. `--copy-only` suppresses source output; `--no-check`
   explicitly skips the focused preflight.
-- `lc doctor` checks tools, dependencies, and hook installation.
+- `lc doctor` checks command and local dependency presence. Use mise and
+  frozen installs for versions; `pnpm prepare` installs hooks.
 - `lc lint`, `lc typecheck`, and `lc format --check` run individual checks.
   `lc format` applies formatting.
 - `lc check` runs formatting checks, lint, TypeScript types, and all tests.

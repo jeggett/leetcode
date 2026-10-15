@@ -28,19 +28,24 @@ For VS Code, accept the workspace extension recommendations and select
 `.venv` as the Python interpreter. Workspace tasks cover scaffolding, tests,
 watch mode, formatting, and validation.
 
+Doctor only checks setup prerequisites. Use `mise current` to inspect tool
+versions, the frozen install commands to synchronize dependencies, and
+`pnpm prepare` to reinstall hooks. `lc ready` validates the actual workspace.
+
 ## Daily workflow
 
 ```sh
 lc https://leetcode.com/problems/search-insert-position/
 # Implement the solution and replace the skipped scaffold tests.
-lc test
+lc test 35
 lc ready
-lc copy
+lc copy 35
 ```
 
-URL scaffolding fetches the official signature, creates `feat/p-####-slug`,
-and writes the solution and test files. It requires a clean worktree and
-refuses existing problems or branches. Use `lc py URL` for Python.
+URL scaffolding fetches the official signature and writes the solution and
+test files. It refuses existing problem IDs. Use `lc py URL` for Python.
+Scaffolding never changes Git branches or requires a clean worktree; use
+ordinary Git commands when you want a separate problem branch.
 
 For offline work, design-class problems, or unsupported judge types:
 
@@ -72,7 +77,7 @@ Manual scaffolding only writes files. It accepts `--url URL` and
 | `lc format [LANG] --check` | Check formatting without edits |
 | `lc lint [LANG]` | Run linters |
 | `lc typecheck` | Check TypeScript types |
-| `lc doctor` | Diagnose toolchain, dependency, and hook setup |
+| `lc doctor` | Find missing tools and local dependency files |
 
 Tests accept a solution or test file path, relative to the calling directory.
 Use `--` to pass runner options: `lc test py 1512 -- -q` or
