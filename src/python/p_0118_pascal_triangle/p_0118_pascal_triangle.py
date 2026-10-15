@@ -1,10 +1,7 @@
-from typing import List
-
-
 class Solution:
     """time O(N^2), space O(1)"""
 
-    def generate(self, numRows: int) -> List[List[int]]:
+    def generate(self, numRows: int) -> list[list[int]]:
         result = [[1]]
         if numRows == 1:
             return result

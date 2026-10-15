@@ -4,14 +4,14 @@
   "version": "1.0.0",
   "description": "Repo created to track progress on leetcode",
   "scripts": {
-    "new": "uv run python scripts/new_problem.py",
-    "submission": "uv run python scripts/submission.py",
-    "test:one": "uv run python scripts/test_one.py",
+    "new": "uv run python -m scripts.new_problem",
+    "submission": "uv run python -m scripts.submission",
+    "test:one": "uv run python -m scripts.test_one",
     "test": "pnpm run test:ts && pnpm run test:py",
     "test:ts": "vitest run",
     "test:ts:watch": "vitest",
     "test:py": "uv run pytest",
-    "incomplete": "uv run python scripts/check_incomplete.py",
+    "incomplete": "uv run python -m scripts.check_incomplete",
     "lint": "pnpm run lint:ts && pnpm run lint:py",
     "lint:ts": "biome lint src/typescript scripts/*.mjs vitest.config.ts",
     "lint:py": "uv run ruff check .",
@@ -25,8 +25,8 @@
     "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
     "ready": "pnpm run incomplete && pnpm run check",
     "ready:all": "pnpm run ready",
-    "doctor": "python scripts/doctor.py",
-    "prepare": "python scripts/install_hooks.py"
+    "doctor": "python -m scripts.doctor",
+    "prepare": "python -m scripts.install_hooks"
   },
   "repository": {
     "type": "git",

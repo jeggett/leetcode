@@ -1,7 +1,4 @@
-from typing import List
-
-
 class Solution:
-    def kidsWithCandies(self, candies: List[int], extraCandies: int) -> List[bool]:
+    def kidsWithCandies(self, candies: list[int], extraCandies: int) -> list[bool]:
         maximum = max(candies)
         return list(map(lambda num: (num + extraCandies) >= maximum, candies))

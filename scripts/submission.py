@@ -10,24 +10,16 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    from scripts.check_incomplete import scaffold_markers
-    from scripts.problem_paths import (
-        ProblemPathError,
-        require_source_path,
-        require_test_path,
-        resolve_problem_paths,
-    )
-    from scripts.test_one import focused_command
-except ModuleNotFoundError:
-    from check_incomplete import scaffold_markers
-    from problem_paths import (
-        ProblemPathError,
-        require_source_path,
-        require_test_path,
-        resolve_problem_paths,
-    )
-    from test_one import focused_command
+from scripts.arguments import UsageError, parse
+from scripts.check_incomplete import scaffold_markers
+from scripts.problem_paths import (
+    ProblemPathError,
+    require_source_path,
+    require_test_path,
+    resolve_problem_paths,
+)
+from scripts.test_one import focused_command
+from scripts.typescript import typescript_command
 
 
 class SubmissionError(ValueError):
@@ -45,47 +37,27 @@ class SubmissionOptions:
     check: bool = True
 
 
-TYPESCRIPT_RENDERER = Path(__file__).with_name("typescript_submission.mjs")
-
-
 def parse_options(arguments: Sequence[str]) -> SubmissionOptions:
-    """Parse submission options, defaulting to a focused safety check."""
-    if len(arguments) < 2:
-        raise SubmissionError("usage: submission <py|ts> <id> [--copy|--copy-only] [--no-check]")
-    language, problem_id, *options = arguments
-    if language not in {"py", "ts"}:
-        raise SubmissionError("language must be 'py' or 'ts'")
-    supported = {"--copy", "--copy-only", "--no-check"}
-    if any(option not in supported for option in options):
-        unknown = next(option for option in options if option not in supported)
-        raise SubmissionError(f"unknown option: {unknown}")
-    duplicates = next((option for option in supported if options.count(option) > 1), None)
-    if duplicates:
-        raise SubmissionError(f"{duplicates} may only be provided once")
-    if "--copy" in options and "--copy-only" in options:
-        raise SubmissionError("--copy and --copy-only cannot be combined")
-    copy_only = "--copy-only" in options
+    """Parse the same submission options used by lc submit."""
+    try:
+        options = parse("submit", arguments)
+    except UsageError as error:
+        raise SubmissionError(str(error)) from error
     return SubmissionOptions(
-        language=language,
-        problem_id=problem_id,
-        copy="--copy" in options or copy_only,
-        copy_only=copy_only,
-        check="--no-check" not in options,
+        options.language,
+        options.problem_id,
+        bool(options.copy or options.copy_only),
+        bool(options.copy_only),
+        not options.no_check,
     )
 
 
 def typescript_submission(source: str) -> str:
-    """Prepare TypeScript with the maintained parser used by the Node renderer."""
-    result = subprocess.run(
-        ["node", str(TYPESCRIPT_RENDERER)],
-        input=source,
-        capture_output=True,
-        check=False,
-        text=True,
-    )
-    if result.returncode != 0:
-        raise SubmissionError(result.stderr.strip() or "could not render TypeScript submission")
-    return result.stdout
+    """Render judge source while preserving comments, literals, and formatting."""
+    try:
+        return typescript_command("submission", source)
+    except ValueError as error:
+        raise SubmissionError(str(error)) from error
 
 
 def read_submission(root: Path, language: str, problem_id: str) -> str:

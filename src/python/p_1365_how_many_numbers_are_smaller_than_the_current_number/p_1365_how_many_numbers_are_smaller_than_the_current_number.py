@@ -1,8 +1,5 @@
-from typing import List
-
-
 class Solution:
-    def smallerNumbersThanCurrent(self, nums: List[int]) -> List[int]:
+    def smallerNumbersThanCurrent(self, nums: list[int]) -> list[int]:
         result = []
         for num in nums:
             count = 0

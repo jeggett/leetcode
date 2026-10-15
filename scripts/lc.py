@@ -16,37 +16,23 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-try:
-    from scripts.new_problem import (
-        ScaffoldError,
-        build_paths,
-        create_problem,
-        slugify,
-        suggested_branch,
-        validate_signature,
-    )
-    from scripts.problem_paths import (
-        ProblemPathError,
-        matching_problem_directories,
-        normalize_problem_id,
-    )
-    from scripts.test_one import TestOneError, focused_command
-except ModuleNotFoundError:
-    from problem_paths import (
-        ProblemPathError,
-        matching_problem_directories,
-        normalize_problem_id,
-    )
-    from test_one import TestOneError, focused_command
-    from new_problem import (  # type: ignore[no-redef]
-        ScaffoldError,
-        build_paths,
-        create_problem,
-        slugify,
-        suggested_branch,
-        validate_signature,
-    )
-
+from scripts.arguments import LANGUAGES, UsageError, parse, split_runner_args
+from scripts.new_problem import (
+    ScaffoldError,
+    build_paths,
+    create_problem,
+    slugify,
+    suggested_branch,
+    validate_signature,
+)
+from scripts.problem_paths import (
+    ProblemPathError,
+    matching_problem_directories,
+    normalize_problem_id,
+    resolve_test_path,
+)
+from scripts.test_one import TestOneError, focused_command
+from scripts.typescript import typescript_command
 
 GRAPHQL_URL = "https://leetcode.com/graphql/"
 GRAPHQL_QUERY = """
@@ -77,7 +63,7 @@ Create:
 Solve:
   lc test                        test the current problem, or all when undetected
   lc test [ts|py] ID             test one problem (TypeScript by default)
-  lc test [ts|py] PATH           test one file
+  lc test [ts|py] PATH           test a solution or test file
   lc watch [ID|PATH]             watch TypeScript tests
   lc submit [ts|py] [ID]         print judge-ready source
   lc copy [ts|py] [ID]           submit and copy to the clipboard
@@ -91,6 +77,7 @@ Quality:
   lc incomplete                  find untouched scaffold markers
   lc doctor                      verify the local setup
 
+Submit options: --copy, --copy-only, --no-check.
 Short aliases: t=test, w=watch, s=submit, r=ready, c=check, fmt=format.
 Languages default to TypeScript. Current problem detection uses the caller's problem
 directory first, then a matching feat/p-####-* branch. Use COMMAND --help for this help.
@@ -98,10 +85,6 @@ directory first, then a matching feat/p-####-* branch. Use COMMAND --help for th
 PROBLEM_PATH = re.compile(r"^/problems/(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)(?:/description)?/?$")
 PROBLEM_DIRECTORY = re.compile(r"^p_(?P<problem_id>[0-9]+)_.+$")
 PROBLEM_BRANCH = re.compile(r"^feat/p-(?P<problem_id>[0-9]{4,})-[a-z0-9]+(?:-[a-z0-9]+)*$")
-TYPESCRIPT_FUNCTION = re.compile(r"(?m)^[ \t]*function[ \t]+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)")
-TYPESCRIPT_DECLARATION = re.compile(
-    r"(?m)^[ \t]*(?:type|interface|class|enum)[ \t]+(?P<name>[A-Za-z_$][A-Za-z0-9_$]*)"
-)
 PYTHON_SOLUTION_CLASS = re.compile(r"(?m)^class[ \t]+Solution(?:\([^\n]*\))?[ \t]*:")
 PYTHON_METHOD = re.compile(r"(?m)^[ \t]+def[ \t]+(?P<header>[^\n]+):[ \t]*$")
 
@@ -110,8 +93,7 @@ class LeetError(ValueError):
     """Raised when URL scaffolding cannot complete safely."""
 
 
-class LcUsageError(ValueError):
-    """Raised when a unified-command invocation is invalid."""
+LcUsageError = UsageError
 
 
 @dataclass(frozen=True)
@@ -123,15 +105,6 @@ class ProblemMetadata:
     title_slug: str
     canonical_url: str
     signature: str
-
-
-@dataclass(frozen=True)
-class CommandResult:
-    """The subset of a Git command result needed by this module."""
-
-    returncode: int
-    stdout: str = ""
-    stderr: str = ""
 
 
 @dataclass(frozen=True)
@@ -153,21 +126,20 @@ class ProblemContext:
     directory: Path
 
 
-GitRunner = Callable[[Sequence[str], Path], CommandResult]
+GitRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
 ProblemFetcher = Callable[[str, str], ProblemMetadata]
 ProblemCreator = Callable[..., tuple[Path, Path, str]]
 
 
-def run_command(command: Sequence[str], cwd: Path) -> CommandResult:
+def run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run a Git command without invoking a shell."""
-    completed = subprocess.run(
+    return subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         check=False,
         text=True,
     )
-    return CommandResult(completed.returncode, completed.stdout, completed.stderr)
 
 
 def canonicalize_problem_url(value: str) -> tuple[str, str]:
@@ -302,36 +274,11 @@ def extract_python_signature(source: str) -> str:
 
 
 def extract_typescript_signature(source: str) -> str:
-    """Extract an ordinary top-level function signature from an official TS snippet."""
-    function_match = TYPESCRIPT_FUNCTION.search(source)
-    if function_match is None:
-        raise LeetError("TypeScript metadata is not an ordinary function; use pnpm new manually")
-    body_start = source.find("{", function_match.end())
-    if body_start == -1:
-        raise LeetError("LeetCode TypeScript snippet has no function body")
-
-    signature = re.sub(
-        r"\s+",
-        " ",
-        source[function_match.start("name") : body_start].strip(),
-    )
-    declared_names = {
-        match["name"] for match in TYPESCRIPT_DECLARATION.finditer(source[: function_match.start()])
-    }
-    required_declarations = sorted(
-        name for name in declared_names if re.search(rf"\b{re.escape(name)}\b", signature)
-    )
-    if required_declarations:
-        names = ", ".join(required_declarations)
-        raise LeetError(
-            f"TypeScript signature needs omitted declaration(s): {names}; use pnpm new manually"
-        )
+    """Extract an ordinary function header using the shared TypeScript parser."""
     try:
-        return validate_signature("ts", signature)[0]
-    except ScaffoldError as error:
-        raise LeetError(
-            f"LeetCode returned an unsupported TypeScript signature: {error}"
-        ) from error
+        return json.loads(typescript_command("extract-signature", source))[0]
+    except ValueError as error:
+        raise LeetError(f"{error}; use lc new manually") from error
 
 
 def _read_graphql_response(response: object) -> bytes:
@@ -442,8 +389,8 @@ def fetch_problem_metadata(
     )
 
 
-def _git_error(action: str, result: CommandResult) -> LeetError:
-    detail = (result.stderr or result.stdout).strip()
+def _git_error(action: str, result: subprocess.CompletedProcess[str]) -> LeetError:
+    detail = (result.stderr or result.stdout or "").strip()
     return LeetError(f"Git could not {action}{f': {detail}' if detail else ''}")
 
 
@@ -549,12 +496,6 @@ def scaffold_from_url(
     return ScaffoldResult(metadata, source_path, test_path, branch)
 
 
-LANGUAGE_ALIASES = {
-    "py": "py",
-    "python": "py",
-    "ts": "ts",
-    "typescript": "ts",
-}
 COMMAND_ALIASES = {
     "a": "new",
     "add": "new",
@@ -575,7 +516,7 @@ COMMAND_ALIASES = {
 
 
 def _canonical_language(value: str) -> str | None:
-    return LANGUAGE_ALIASES.get(value.lower())
+    return LANGUAGES.get(value.lower())
 
 
 def _normalized_problem_id(value: str) -> str:
@@ -648,37 +589,6 @@ def detect_problem_context(
     return ProblemContext(language, problem_id, directories[language])
 
 
-def _split_passthrough(arguments: Sequence[str]) -> tuple[list[str], list[str]]:
-    values = list(arguments)
-    if "--" not in values:
-        return values, []
-    separator = values.index("--")
-    if "--" in values[separator + 1 :]:
-        raise LcUsageError("-- may only be provided once")
-    return values[:separator], values[separator + 1 :]
-
-
-def _test_path(
-    root: Path,
-    caller_cwd: Path,
-    value: str,
-    explicit_language: str | None,
-) -> tuple[str, str]:
-    path = Path(value)
-    absolute = path if path.is_absolute() else caller_cwd / path
-    try:
-        relative = absolute.resolve().relative_to(root.resolve())
-    except (OSError, ValueError) as error:
-        raise LcUsageError("test path must be inside this repository") from error
-    normalized = relative.as_posix()
-    inferred = "py" if normalized.endswith(".py") else "ts" if normalized.endswith(".ts") else None
-    if inferred is None:
-        raise LcUsageError("test path must end in .py or .ts")
-    if explicit_language is not None and explicit_language != inferred:
-        raise LcUsageError("test path extension does not match the selected language")
-    return explicit_language or inferred, normalized
-
-
 def _test_command(
     arguments: Sequence[str],
     root: Path,
@@ -687,23 +597,12 @@ def _test_command(
     force_watch: bool = False,
     git_run: GitRunner = run_command,
 ) -> tuple[str, ...]:
-    values, passthrough = _split_passthrough(arguments)
-    watch_count = values.count("--watch") + int(force_watch)
-    values = [value for value in values if value != "--watch"]
-    if watch_count > 1:
-        raise LcUsageError("--watch may only be provided once")
-    unknown = next((value for value in values if value.startswith("--")), None)
-    if unknown is not None:
-        raise LcUsageError(f"unknown test option: {unknown}")
-
-    language: str | None = None
-    if values and (selected := _canonical_language(values[0])) is not None:
-        language = selected
-        values.pop(0)
-    if len(values) > 1:
-        raise LcUsageError("usage: lc test [ts|py] [ID|PATH] [--watch]")
-    target = values[0] if values else None
-    watch = watch_count == 1
+    values, passthrough = split_runner_args(arguments)
+    if force_watch:
+        values.append("--watch")
+    options = parse("test", values, scoped=True)
+    language, target = options.language, options.problem_id
+    watch = bool(options.watch)
     explicit_all = target == "all"
 
     if explicit_all:
@@ -715,7 +614,10 @@ def _test_command(
 
     path: str | None = None
     if target is not None and not target.removesuffix(".").isdecimal():
-        language, path = _test_path(root, caller_cwd, target, language)
+        try:
+            language, path = resolve_test_path(root, caller_cwd, target, language)
+        except ProblemPathError as error:
+            raise LcUsageError(str(error)) from error
         target = None
     if language is None and (target is not None or watch):
         language = "ts"
@@ -743,43 +645,23 @@ def _submit_command(
     force_copy: bool = False,
     git_run: GitRunner = run_command,
 ) -> tuple[str, ...]:
-    values = list(arguments)
-    copy_count = values.count("--copy") + int(force_copy)
-    values = [value for value in values if value != "--copy"]
-    if copy_count > 1:
-        raise LcUsageError("--copy may only be provided once")
-    unknown = next((value for value in values if value.startswith("-")), None)
-    if unknown is not None:
-        raise LcUsageError(f"unknown submit option: {unknown}")
-
-    language: str | None = None
-    if values and (selected := _canonical_language(values[0])) is not None:
-        language = selected
-        values.pop(0)
-    if len(values) > 1:
-        raise LcUsageError("usage: lc submit [ts|py] [ID] [--copy]")
-
-    if values:
-        problem_id = values[0]
+    options = parse("submit", arguments, scoped=True)
+    if force_copy and not options.copy_only:
+        options.copy = True
+    if options.problem_id:
+        problem_id = options.problem_id
         _normalized_problem_id(problem_id)
-        selected_language = language or "ts"
+        language = options.language or "ts"
     else:
         context = detect_problem_context(root, caller_cwd, git_run=git_run)
         if context is None:
             raise LcUsageError("no current problem detected; provide a problem ID")
         problem_id = context.problem_id
-        selected_language = language or context.language
-
-    command = [
-        "uv",
-        "run",
-        "python",
-        "scripts/submission.py",
-        selected_language,
-        problem_id,
-    ]
-    if copy_count == 1:
-        command.append("--copy")
+        language = options.language or context.language
+    command = ["uv", "run", "python", "-m", "scripts.submission", language, problem_id]
+    for flag in ("copy", "copy_only", "no_check"):
+        if getattr(options, flag):
+            command.append("--" + flag.replace("_", "-"))
     return tuple(command)
 
 
@@ -789,23 +671,12 @@ def _scoped_quality_command(
     *,
     allow_check: bool = False,
 ) -> tuple[str, ...]:
-    values = list(arguments)
-    if allow_check:
-        values = ["--check" if value == "check" else value for value in values]
-    check_count = values.count("--check")
-    values = [value for value in values if value != "--check"]
-    if check_count and not allow_check:
-        raise LcUsageError(f"{script} does not support --check")
-    if check_count > 1:
-        raise LcUsageError("--check may only be provided once")
-    if len(values) > 1:
-        raise LcUsageError(f"usage: lc {script} [ts|py]{' [--check]' if allow_check else ''}")
-    language = _canonical_language(values[0]) if values else None
-    if values and language is None:
-        raise LcUsageError("language must be 'py' or 'ts'")
-    effective_script = f"{script}:check" if check_count else script
-    if language is not None:
-        effective_script = f"{effective_script}:{language}"
+    values = ["--check" if allow_check and value == "check" else value for value in arguments]
+    options = parse(script, values, scoped=True)
+    check = allow_check and options.check
+    effective_script = f"{script}:check" if check else script
+    if options.language:
+        effective_script += f":{options.language}"
     return ("pnpm", "run", effective_script)
 
 
@@ -835,14 +706,13 @@ def build_command(
     if command == "copy":
         return _submit_command(rest, root, caller_cwd, force_copy=True, git_run=git_run)
     if command == "new":
-        language = "ts"
-        if rest and (selected := _canonical_language(rest[0])) is not None:
-            language = selected
-            rest.pop(0)
-        if len(rest) < 2:
-            raise LcUsageError("usage: lc new [ts|py] ID TITLE... [--url URL] [--signature SIG]")
-        _normalized_problem_id(rest[0])
-        return ("pnpm", "run", "new", language, *rest)
+        options = parse("new", rest, scoped=True)
+        _normalized_problem_id(options.problem_id)
+        forwarded = [options.language or "ts", options.problem_id, *options.title]
+        for flag in ("url", "signature"):
+            if getattr(options, flag) is not None:
+                forwarded.extend(["--" + flag, getattr(options, flag)])
+        return ("pnpm", "run", "new", *forwarded)
     if command in {"format", "lint"}:
         return _scoped_quality_command(
             command,
@@ -924,7 +794,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         command = build_command(arguments, root, caller_cwd)
         return run_interactive_command(command, root)
-    except LcUsageError as error:
+    except (LcUsageError, ProblemPathError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 2
     except LeetError as error:

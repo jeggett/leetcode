@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 
-from scripts.doctor import CommandResult, collect_checks, format_report, main, parse_version
+from scripts.doctor import collect_checks, format_report, main, parse_version
 
 
 def write_metadata(root: Path, *, package_manager: str = "pnpm@11.20.0") -> None:
@@ -86,7 +87,9 @@ def write_lefthook_installation(root: Path) -> None:
         generated_hook.chmod(0o755)
 
 
-def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResult:
+def command_runner(
+    command: tuple[str, ...] | list[str], _: Path
+) -> subprocess.CompletedProcess[str]:
     outputs = {
         ("mise", "trust", "--show"): "/tmp/project: trusted\n",
         ("node", "--version"): "v22.14.0\n",
@@ -98,7 +101,7 @@ def command_runner(command: tuple[str, ...] | list[str], _: Path) -> CommandResu
             _ / ".git/hooks/pre-commit"
         ),
     }
-    return CommandResult(0, outputs[tuple(command)])
+    return subprocess.CompletedProcess([], 0, outputs[tuple(command)])
 
 
 def test_parse_version_accepts_common_version_command_output() -> None:
@@ -273,7 +276,9 @@ def test_collect_checks_resolves_worktree_hook_through_git(tmp_path: Path) -> No
     shared_hook.write_text('#!/bin/sh\nlefthook run pre-commit -- "$@"\n', encoding="utf-8")
     shared_hook.chmod(0o755)
 
-    def worktree_runner(command: tuple[str, ...] | list[str], root: Path) -> CommandResult:
+    def worktree_runner(
+        command: tuple[str, ...] | list[str], root: Path
+    ) -> subprocess.CompletedProcess[str]:
         if tuple(command) == (
             "git",
             "rev-parse",
@@ -281,7 +286,7 @@ def test_collect_checks_resolves_worktree_hook_through_git(tmp_path: Path) -> No
             "--git-path",
             "hooks/pre-commit",
         ):
-            return CommandResult(0, f"{shared_hook}\n")
+            return subprocess.CompletedProcess([], 0, f"{shared_hook}\n")
         return command_runner(command, root)
 
     checks = collect_checks(tmp_path, find_command=lambda _: "/usr/bin/tool", run=worktree_runner)

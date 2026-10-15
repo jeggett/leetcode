@@ -11,7 +11,6 @@ import pytest
 
 from scripts import lc
 from scripts.lc import (
-    CommandResult,
     LeetError,
     ProblemMetadata,
     ScaffoldResult,
@@ -21,7 +20,6 @@ from scripts.lc import (
     fetch_problem_metadata,
     scaffold_from_url,
 )
-
 
 PROBLEM_URL = "https://leetcode.com/problems/search-insert-position/"
 TS_SIGNATURE = "searchInsert(nums: number[], target: number): number"
@@ -102,30 +100,34 @@ class FakeGit:
         self.calls: list[tuple[str, ...]] = []
         self.fail_delete = False
 
-    def __call__(self, command: Sequence[str], cwd: Path) -> CommandResult:
+    def __call__(self, command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
         assert cwd == self.root
         call = tuple(command)
         self.calls.append(call)
         if call == ("git", "rev-parse", "--show-toplevel"):
-            return CommandResult(0, f"{self.root}\n")
+            return subprocess.CompletedProcess([], 0, f"{self.root}\n")
         if call == ("git", "status", "--porcelain"):
-            return CommandResult(0, " M work.py\n" if self.dirty else "")
+            return subprocess.CompletedProcess([], 0, " M work.py\n" if self.dirty else "")
         if call == ("git", "branch", "--show-current"):
-            return CommandResult(0, f"{self.current_branch}\n")
+            return subprocess.CompletedProcess([], 0, f"{self.current_branch}\n")
         if call[:4] == ("git", "show-ref", "--verify", "--quiet"):
-            return CommandResult(0 if self.branch_exists else 1)
+            return subprocess.CompletedProcess([], 0 if self.branch_exists else 1)
         if call == ("git", "for-each-ref", "--format=%(refname)", "refs/remotes"):
             remote_ref = "refs/remotes/origin/feat/p-0035-search-insert-position\n"
-            return CommandResult(0, remote_ref if self.remote_branch_exists else "")
+            return subprocess.CompletedProcess(
+                [], 0, remote_ref if self.remote_branch_exists else ""
+            )
         if call[:3] == ("git", "switch", "-c"):
             self.current_branch = call[3]
-            return CommandResult(0)
+            return subprocess.CompletedProcess([], 0)
         if call[:2] == ("git", "switch"):
             self.current_branch = call[2]
-            return CommandResult(0)
+            return subprocess.CompletedProcess([], 0)
         if call[:3] == ("git", "branch", "-D"):
             return (
-                CommandResult(1, stderr="delete failed") if self.fail_delete else CommandResult(0)
+                subprocess.CompletedProcess([], 1, stderr="delete failed")
+                if self.fail_delete
+                else subprocess.CompletedProcess([], 0)
             )
         raise AssertionError(f"unexpected Git command: {call}")
 
@@ -487,3 +489,14 @@ def test_help_prints_usage_and_succeeds(capsys: pytest.CaptureFixture[str]) -> N
     assert "lc URL" in output
     assert "lc test" in output
     assert "lc ready" in output
+
+
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "solve(value: { n: number }, fn: (n: number) => number): { n: number }",
+        'solve(value: "a  b"): "a  b"',
+    ],
+)
+def test_extracts_typescript_headers_without_confusing_type_braces(signature: str) -> None:
+    assert extract_typescript_signature(f"function {signature} {{}}") == signature

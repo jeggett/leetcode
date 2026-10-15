@@ -1,12 +1,9 @@
-/* time O(n), space O(n) */
+/* time: O(n), space: O(n) */
 export function containsDuplicate(nums: number[]): boolean {
-    const numSeenMap: Map<number, void> = new Map<number, void>();
+    const seen = new Set<number>();
     for (const num of nums) {
-        if (numSeenMap.has(num)) {
-            return true;
-        } else {
-            numSeenMap.set(num);
-        }
+        if (seen.has(num)) return true;
+        seen.add(num);
     }
     return false;
 }

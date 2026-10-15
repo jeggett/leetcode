@@ -1,61 +1,68 @@
 # Repository Guide
 
-Optional personal working agreements: `~/.codex/AGENTS.md`, if present. This tracked guide
+Optional personal agreements: `~/.codex/AGENTS.md`, if present. This guide
 is self-contained; no external instruction file is required.
 
 ## Layout
 
-Solutions are grouped by language under `src/typescript/` and `src/python/`. Each problem uses
-`p_####_<slug>/`: TypeScript has `<stem>.ts` and `<stem>.test.ts`; Python has `<stem>.py` and
-`test_<stem>.py`. Put reusable TypeScript data structures in `src/typescript/data_structures/` and
-judge-provided types in `src/typescript/judge-types.d.ts`. Workflow commands live in `scripts/`,
-with tests in `tests/`.
+Solutions live in `src/typescript/` and `src/python/`, grouped by
+`p_####_<slug>/`. TypeScript uses `<stem>.ts` and `<stem>.test.ts`; Python
+uses `<stem>.py` and `test_<stem>.py`. Shared TypeScript test helpers belong
+in `src/typescript/data_structures/`; judge types belong in
+`src/typescript/judge-types.d.ts`.
+
+Workflow commands live in `scripts/`, with tests in `tests/`. Run Python
+commands as modules from the repository root: `python -m scripts.NAME`.
+`arguments.py` defines shared command options, `problem_paths.py` resolves
+source and test paths, and `typescript.mjs` uses Babel for signatures and
+submission rendering. Reuse these boundaries when adding behavior.
 
 ## Tooling and commands
 
-Install the pinned toolchain with `mise install`, JavaScript dependencies with
-`pnpm install`, and Python dependencies with `uv sync --frozen`. `mise.toml`
-pins Node.js, pnpm, Python, and uv; keep the version files and `package.json`
-consistent with those pins. TypeScript uses Vitest and Biome; Python uses
-pytest and Ruff. The submission renderer uses `@babel/parser` to read
-TypeScript syntax while preserving the original source text.
+Install tools with `mise install`, JavaScript dependencies with
+`pnpm install --frozen-lockfile`, and Python dependencies with
+`uv sync --frozen`. Keep tool declarations in `mise.toml`, version files,
+and `package.json` consistent. `pnpm prepare` installs the Git hook.
 
-Use `lc` as the public workflow command. `lc <leetcode-url>` fetches official metadata, creates
-`feat/p-####-slug`, and scaffolds TypeScript; add `py` before the URL for Python. The file-only
-fallback is `lc new [ts|py] <number> <title...>`, with optional `--url` and `--signature` metadata.
+Use `lc` for interactive work:
 
-- `lc test` runs the current problem when detected from the caller directory or problem branch,
-  otherwise all tests. Pass `[ts|py] <number-or-path>` explicitly; `lc watch` enables Vitest watch.
-- `lc submit [ts|py] [number]` prints judge-ready source; `lc copy` also copies it.
-- `lc doctor` checks the toolchain, dependencies, and Git-hook installation.
-- `lc lint`, `lc typecheck`, and `lc format --check` run individual read-only checks; `lc format`
-  applies Biome and Ruff formatting.
-- `lc check` runs format checks, linting, TypeScript type checking, and all tests.
-- `lc incomplete` reports untouched scaffold markers; `lc ready` requires none, then runs the full
-  checks. Run `lc ready` before submitting.
+- `lc URL` fetches metadata, creates a problem branch, and scaffolds
+  TypeScript. Use `lc py URL` for Python.
+- `lc new [ts|py] ID TITLE...` scaffolds files without Git or network access.
+  It accepts optional `--url` and `--signature` metadata.
+- `lc test` runs the detected problem or, without context, all tests.
+  Pass `[ts|py] ID|PATH` explicitly; source paths resolve to their tests.
+  Runner options follow `--`. `lc watch` watches TypeScript tests.
+- `lc submit [ts|py] [ID]` checks and renders a submission. `lc copy`
+  also copies it. `--copy-only` suppresses source output; `--no-check`
+  explicitly skips the focused preflight.
+- `lc doctor` checks tools, dependencies, and hook installation.
+- `lc lint`, `lc typecheck`, and `lc format --check` run individual checks.
+  `lc format` applies formatting.
+- `lc check` runs formatting checks, lint, TypeScript types, and all tests.
+- `lc ready` rejects incomplete scaffolds before running `lc check`.
+  Run it before submitting or committing.
 
-The `pnpm` scripts remain stable low-level interfaces for automation and unusual runner options.
-
-Use `lc test [ts|py] [ID|PATH] -- RUNNER_ARGS` to pass options to a focused
-runner. `scripts/problem_paths.py` owns canonical solution and test paths;
-scaffolding, current-problem detection, testing, and submission share it.
+The pnpm scripts remain stable low-level interfaces for automation. Git
+commit, push, and pull remain ordinary Git commands. See README.md for setup
+and the full command reference.
 
 ## Style and tests
 
-Use four spaces, UTF-8, final newlines, and no trailing whitespace. Keep explicit `.js` extensions
-in relative TypeScript test/helper imports. TypeScript solution files should avoid module imports,
-CommonJS syntax, and triple-slash references so `lc submit` can render them safely. Prefer named
-exports, target ES2024 APIs, and include a concise `time: O(...)` / `space: O(...)` comment in
-completed solutions. Python solutions normally use a `Solution` class with LeetCode-compatible
-camelCase methods.
+Use four spaces, UTF-8, final newlines, and no trailing whitespace.
+TypeScript targets ES2024. Keep explicit `.js` extensions in relative test
+and helper imports. Solutions should use named exports and avoid imports,
+CommonJS syntax, and triple-slash references so rendering stays safe.
+Python normally uses a `Solution` class with judge-compatible camelCase
+methods and built-in collection annotations such as `list[int]`.
 
-Co-locate tests with each solution. Cover supplied examples plus meaningful empty, singleton,
-boundary, and duplicate cases. Use Vitest `*.test.ts` and pytest `test_*.py` names; skip scaffold
-placeholders only until real examples are added.
+Completed solutions include `time: O(...)` / `space: O(...)` comments.
+Colocate tests and cover supplied examples plus meaningful boundaries,
+duplicates, and mutation behavior. Replace skipped scaffold tests before
+running `lc ready`. Keep regression tests for failed judge inputs.
 
 ## Commits and pull requests
 
-Use focused, lowercase Conventional Commit subjects such as `feat: circular array loop` or
-`feat(0283): move zeroes`. Branches generally use `feat/p-####-slug` or `chore/slug`. Pull requests
-should summarize the algorithm and complexity, list validation commands, and link the LeetCode
-problem or relevant issue.
+Use short Conventional Commit subjects and PR titles, with an issue ID
+when available. PR descriptions contain only `Closes ISSUE-ID`, or remain
+empty without an issue. Report validation in chat.

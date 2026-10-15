@@ -18,8 +18,8 @@ import sys
 import tomllib
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from importlib.metadata import distributions
 from pathlib import Path
-
 
 REQUIRED_COMMANDS = ("mise", "node", "pnpm", "python", "uv", "git")
 VERSION_COMMANDS = {
@@ -47,23 +47,14 @@ class Check:
     detail: str
 
 
-@dataclass(frozen=True)
-class CommandResult:
-    """The limited command result needed by this module."""
-
-    returncode: int
-    stdout: str = ""
-    stderr: str = ""
-
-
-CommandRunner = Callable[[Sequence[str], Path], CommandResult]
+CommandRunner = Callable[[Sequence[str], Path], subprocess.CompletedProcess[str]]
 CommandFinder = Callable[[str], str | None]
 
 
-def run_command(command: Sequence[str], cwd: Path) -> CommandResult:
+def run_command(command: Sequence[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     """Run a read-only command and return only the fields used by this module."""
     try:
-        completed = subprocess.run(
+        return subprocess.run(
             command,
             cwd=cwd,
             capture_output=True,
@@ -71,16 +62,7 @@ def run_command(command: Sequence[str], cwd: Path) -> CommandResult:
             text=True,
         )
     except OSError as error:
-        return CommandResult(1, stderr=str(error))
-    return CommandResult(completed.returncode, completed.stdout, completed.stderr)
-
-
-def _run(run: CommandRunner, command: Sequence[str], cwd: Path) -> CommandResult:
-    """Call an injected runner while keeping diagnostics alive on stub failures."""
-    try:
-        return run(command, cwd)
-    except (KeyError, OSError, TypeError, ValueError) as error:
-        return CommandResult(1, stderr=str(error))
+        return subprocess.CompletedProcess(command, 1, "", str(error))
 
 
 def parse_version(output: str) -> str | None:
@@ -223,7 +205,7 @@ def version_checks(
             checks.append(Check(f"{command} version", False, "command is unavailable"))
             continue
 
-        result = _run(run, invocation, root)
+        result = run(invocation, root)
         found = parse_version(result.stdout or result.stderr)
         passed = result.returncode == 0 and found == expected
         if result.returncode != 0:
@@ -286,34 +268,15 @@ def python_site_packages(root: Path) -> list[Path]:
     return [candidate for candidate in candidates if candidate.is_dir()]
 
 
-def distribution_metadata(path: Path) -> dict[str, str]:
-    """Read the simple fields needed from a Python distribution METADATA file."""
-    try:
-        lines = path.read_text(encoding="utf-8").splitlines()
-    except OSError, UnicodeDecodeError:
-        return {}
-
-    fields: dict[str, str] = {}
-    for line in lines:
-        if not line:
-            break
-        key, separator, value = line.partition(":")
-        if separator and key in {"Name", "Version"}:
-            fields[key] = value.strip()
-    return fields
-
-
 def installed_python_dependency_version(root: Path, dependency: str) -> str | None:
-    """Read a local Python dependency's version without importing it."""
-    normalized_dependency = re.sub(r"[-_.]+", "-", dependency).lower()
-    for site_packages in python_site_packages(root):
-        for metadata_path in sorted(site_packages.glob("*.dist-info/METADATA")):
-            metadata = distribution_metadata(metadata_path)
-            installed_name = metadata.get("Name", "")
-            normalized_name = re.sub(r"[-_.]+", "-", installed_name).lower()
-            if normalized_name == normalized_dependency and metadata.get("Version"):
-                return metadata["Version"]
-    return None
+    """Read installed distribution metadata using the standard library."""
+    return next(
+        (
+            distribution.version
+            for distribution in distributions(name=dependency, path=python_site_packages(root))
+        ),
+        None,
+    )
 
 
 def dependency_check(
@@ -378,7 +341,7 @@ def mise_trust_check(root: Path, available: set[str], run: CommandRunner) -> Che
     """Verify the project config is trusted without trusting it as a side effect."""
     if "mise" not in available:
         return Check("mise trust", False, "mise command is unavailable")
-    result = _run(run, ("mise", "trust", "--show"), root)
+    result = run(("mise", "trust", "--show"), root)
     output = "\n".join(part for part in (result.stdout, result.stderr) if part)
     if result.returncode != 0:
         return Check("mise trust", False, "could not inspect trust; run mise trust")
@@ -412,8 +375,7 @@ def lefthook_config_check(root: Path) -> Check:
 
 def lefthook_generated_hook_check(root: Path, run: CommandRunner) -> Check:
     """Verify Lefthook installed an executable Git pre-commit hook."""
-    result = _run(
-        run,
+    result = run(
         ("git", "rev-parse", "--path-format=absolute", "--git-path", "hooks/pre-commit"),
         root,
     )
