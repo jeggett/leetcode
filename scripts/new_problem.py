@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import keyword
 import re
 import sys
@@ -11,22 +12,15 @@ import unicodedata
 from pathlib import Path
 from typing import Sequence
 
-try:
-    from scripts.problem_paths import (
-        ProblemPathError,
-        ProblemPaths,
-        language_directory,
-        matching_problem_directories,
-        normalize_problem_id,
-    )
-except ModuleNotFoundError:
-    from problem_paths import (
-        ProblemPathError,
-        ProblemPaths,
-        language_directory,
-        matching_problem_directories,
-        normalize_problem_id,
-    )
+from scripts.arguments import UsageError, parse
+from scripts.problem_paths import (
+    ProblemPathError,
+    ProblemPaths,
+    language_directory,
+    matching_problem_directories,
+    normalize_problem_id,
+)
+from scripts.typescript import typescript_command
 
 
 class ScaffoldError(ValueError):
@@ -34,20 +28,8 @@ class ScaffoldError(ValueError):
 
 
 LEETCODE_PROBLEM_URL = re.compile(r"^https://leetcode\.com/problems/[a-z0-9]+(?:-[a-z0-9]+)*/$")
-TYPESCRIPT_IDENTIFIER = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 PYTHON_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-TYPESCRIPT_RESERVED_IDENTIFIERS = frozenset(
-    """
-    abstract any as asserts async await bigint boolean break case catch class const continue
-    debugger declare default delete do else enum export extends false finally for from function
-    get if implements import in infer instanceof interface is keyof let module namespace never new
-    null number object of package private protected public readonly require return set static string
-    super switch symbol this throw true try type typeof undefined unique unknown var void while with
-    yield
-    """.split()
-)
 SIGNATURE_LINE_SEPARATORS = "\r\n\u2028\u2029"
-TYPESCRIPT_FORBIDDEN_SIGNATURE_TOKENS = ("//", "/*", "*/", "#", ";", "{", "}", "=>")
 
 
 def slugify(title: str) -> str:
@@ -98,77 +80,12 @@ def invalid_signature(language: str) -> ScaffoldError:
     return ScaffoldError(f"invalid {language} signature; expected {expected}")
 
 
-def matching_delimiter(value: str, start: int, opening: str, closing: str) -> int | None:
-    """Return the matching delimiter index, or none when the input is unbalanced."""
-    depth = 0
-    for index in range(start, len(value)):
-        character = value[index]
-        if character == opening:
-            depth += 1
-        elif character == closing:
-            depth -= 1
-            if depth == 0:
-                return index
-            if depth < 0:
-                return None
-    return None
-
-
-def has_balanced_typescript_delimiters(value: str) -> bool:
-    """Return whether the limited, opaque TypeScript signature delimiters balance."""
-    opening_for = {")": "(", "]": "[", ">": "<"}
-    stack: list[str] = []
-    for character in value:
-        if character in "([<":
-            stack.append(character)
-        elif character in opening_for:
-            if not stack or stack.pop() != opening_for[character]:
-                return False
-    return not stack
-
-
 def validate_typescript_signature(signature: str) -> tuple[str, str]:
-    """Validate a safe TypeScript function declaration signature and return its name."""
-    if any(token in signature for token in TYPESCRIPT_FORBIDDEN_SIGNATURE_TOKENS):
-        raise invalid_signature("ts")
-
-    name_match = TYPESCRIPT_IDENTIFIER.match(signature)
-    if name_match is None:
-        raise invalid_signature("ts")
-    name = name_match.group()
-    if name in TYPESCRIPT_RESERVED_IDENTIFIERS:
-        raise invalid_signature("ts")
-
-    position = name_match.end()
-    while position < len(signature) and signature[position].isspace():
-        position += 1
-    if position < len(signature) and signature[position] == "<":
-        generic_end = matching_delimiter(signature, position, "<", ">")
-        if generic_end is None or generic_end == position + 1:
-            raise invalid_signature("ts")
-        position = generic_end + 1
-    while position < len(signature) and signature[position].isspace():
-        position += 1
-    if position == len(signature) or signature[position] != "(":
-        raise invalid_signature("ts")
-    parameters_end = matching_delimiter(signature, position, "(", ")")
-    if parameters_end is None:
-        raise invalid_signature("ts")
-
-    position = parameters_end + 1
-    while position < len(signature) and signature[position].isspace():
-        position += 1
-    if position == len(signature) or signature[position] != ":":
-        raise invalid_signature("ts")
-    return_type = signature[position + 1 :].strip()
-    if (
-        not return_type
-        or return_type[0] in ":,;)}]"
-        or return_type[-1] in ":,;|&<>=?"
-        or not has_balanced_typescript_delimiters(signature)
-    ):
-        raise invalid_signature("ts")
-    return signature, name
+    """Validate a function header with the same parser used for submissions."""
+    try:
+        return tuple(json.loads(typescript_command("signature", signature)))
+    except ValueError as error:
+        raise ScaffoldError(f"invalid ts signature: {error}") from error
 
 
 def validate_python_signature(signature: str) -> tuple[str, str]:
@@ -389,43 +306,12 @@ def create_problem(
 
 
 def parse_arguments(arguments: Sequence[str]) -> tuple[str, str, list[str], str | None, str | None]:
-    """Parse CLI arguments while allowing optional metadata after the title."""
-    if len(arguments) < 3:
-        raise ScaffoldError(
-            "usage: new_problem.py <py|ts> <problem-number> <title...> "
-            "[--url URL] [--signature SIGNATURE]"
-        )
-
-    language, problem_number = arguments[:2]
-    title_parts: list[str] = []
-    problem_url: str | None = None
-    signature: str | None = None
-    position = 2
-    while position < len(arguments):
-        argument = arguments[position]
-        if argument == "--url":
-            if problem_url is not None:
-                raise ScaffoldError("problem URL may only be provided once")
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--url requires a URL")
-            problem_url = arguments[position + 1]
-            position += 2
-        elif argument == "--signature":
-            if signature is not None:
-                raise ScaffoldError("signature may only be provided once")
-            if position + 1 == len(arguments):
-                raise ScaffoldError("--signature requires a signature")
-            signature = arguments[position + 1]
-            position += 2
-        elif argument.startswith("--"):
-            raise ScaffoldError(f"unknown option: {argument}")
-        else:
-            title_parts.append(argument)
-            position += 1
-
-    if not title_parts:
-        raise ScaffoldError("title is required")
-    return language, problem_number, title_parts, problem_url, signature
+    """Parse the same scaffold options used by lc new."""
+    try:
+        options = parse("new", arguments)
+    except UsageError as error:
+        raise ScaffoldError(str(error)) from error
+    return options.language, options.problem_id, options.title, options.url, options.signature
 
 
 def main(argv: Sequence[str] | None = None) -> int:

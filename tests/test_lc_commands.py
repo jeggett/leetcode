@@ -1,12 +1,12 @@
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Sequence
 from pathlib import Path
 
 import pytest
 
 from scripts import lc
-
 
 PROBLEM_URL = "https://leetcode.com/problems/search-insert-position/"
 
@@ -22,12 +22,12 @@ def make_problem(root: Path, language: str, problem_id: str = "0035") -> Path:
     return directory
 
 
-def branch_runner(branch: str) -> lc.CommandResult:
+def branch_runner(branch: str) -> subprocess.CompletedProcess[str]:
     """Return a Git runner that only permits the branch lookup used for context."""
 
-    def run(command: Sequence[str], _cwd: Path) -> lc.CommandResult:
+    def run(command: Sequence[str], _cwd: Path) -> subprocess.CompletedProcess[str]:
         assert tuple(command) == ("git", "branch", "--show-current")
-        return lc.CommandResult(0, f"{branch}\n")
+        return subprocess.CompletedProcess([], 0, f"{branch}\n")
 
     return run
 
@@ -125,11 +125,11 @@ def test_detects_only_strict_feature_problem_branches(tmp_path: Path) -> None:
         ),
         (
             ("submit", "35"),
-            ("uv", "run", "python", "scripts/submission.py", "ts", "35"),
+            ("uv", "run", "python", "-m", "scripts.submission", "ts", "35"),
         ),
         (
             ("submit", "py", "35", "--copy"),
-            ("uv", "run", "python", "scripts/submission.py", "py", "35", "--copy"),
+            ("uv", "run", "python", "-m", "scripts.submission", "py", "35", "--copy"),
         ),
         (("ready",), ("pnpm", "run", "ready")),
         (("check",), ("pnpm", "run", "check")),
@@ -176,11 +176,11 @@ def test_builds_the_documented_dispatcher_commands(
         ),
         (
             ("s", "35"),
-            ("uv", "run", "python", "scripts/submission.py", "ts", "35"),
+            ("uv", "run", "python", "-m", "scripts.submission", "ts", "35"),
         ),
         (
             ("copy", "35"),
-            ("uv", "run", "python", "scripts/submission.py", "ts", "35", "--copy"),
+            ("uv", "run", "python", "-m", "scripts.submission", "ts", "35", "--copy"),
         ),
         (("r",), ("pnpm", "run", "ready")),
         (("c",), ("pnpm", "run", "check")),
@@ -214,7 +214,8 @@ def test_uses_detected_context_for_test_submit_and_watch(tmp_path: Path) -> None
         "uv",
         "run",
         "python",
-        "scripts/submission.py",
+        "-m",
+        "scripts.submission",
         "ts",
         "0035",
         "--copy",
@@ -423,3 +424,30 @@ def test_main_reports_a_missing_focused_test(
     monkeypatch.setattr(lc, "__file__", str(tmp_path / "scripts/lc.py"))
     assert lc.main(["test", "35"]) == 2
     assert "solution test is missing" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("language", ["py", "ts"])
+def test_source_and_test_paths_select_the_same_runner(tmp_path: Path, language: str) -> None:
+    directory = make_problem(tmp_path, language)
+    source = directory / f"{directory.name}.{language}"
+    source.write_text("", encoding="utf-8")
+    assert lc.build_command(["test", source.name], tmp_path, directory) == lc.build_command(
+        ["test", language, "35"], tmp_path, directory
+    )
+
+
+@pytest.mark.parametrize("command", ["submit", "copy"])
+def test_submit_exposes_the_low_level_copy_and_check_options(tmp_path: Path, command: str) -> None:
+    assert lc.build_command(
+        [command, "py", "35", "--copy-only", "--no-check"], tmp_path, tmp_path
+    ) == (
+        "uv",
+        "run",
+        "python",
+        "-m",
+        "scripts.submission",
+        "py",
+        "35",
+        "--copy-only",
+        "--no-check",
+    )

@@ -92,3 +92,31 @@ def require_test_path(paths: ProblemPaths) -> Path:
     if not paths.test_path.is_file():
         raise ProblemPathError(f"solution test is missing: {paths.test_path}")
     return paths.test_path
+
+
+def resolve_test_path(
+    root: Path, caller_cwd: Path, value: str, language: str | None = None
+) -> tuple[str, str]:
+    """Resolve a source or test path from the caller to its existing test file."""
+    root = root.resolve()
+    path = (caller_cwd / value).resolve()
+    if not path.is_relative_to(root):
+        raise ProblemPathError("test path must be inside this repository")
+    inferred = {".py": "py", ".ts": "ts"}.get(path.suffix)
+    if inferred is None:
+        raise ProblemPathError("test path must end in .py or .ts")
+    if language is not None and language != inferred:
+        raise ProblemPathError("test path extension does not match the selected language")
+    paths = ProblemPaths(inferred, "", path.parent)
+    if path == paths.source_path:
+        path = require_test_path(paths)
+    elif inferred == "py" and not path.name.startswith("test_"):
+        path = path.with_name(f"test_{path.name}")
+    elif inferred == "ts" and not path.name.endswith(".test.ts"):
+        path = path.with_suffix(".test.ts")
+    path = path.resolve()
+    if not path.is_relative_to(root):
+        raise ProblemPathError("test path must be inside this repository")
+    if not path.is_file():
+        raise ProblemPathError(f"solution test is missing: {path}")
+    return inferred, path.relative_to(root).as_posix()

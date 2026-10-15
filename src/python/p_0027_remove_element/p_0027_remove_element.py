@@ -1,8 +1,5 @@
-from typing import List
-
-
 class Solution:
-    def removeElement(self, nums: List[int], val: int) -> int:
+    def removeElement(self, nums: list[int], val: int) -> int:
         i, j = 0, len(nums) - 1
         while i <= j:
             if nums[i] == val:
@@ -13,8 +10,3 @@ class Solution:
                 i += 1
 
         return j + 1
-
-
-solution = Solution()
-
-solution.removeElement([1], 1)

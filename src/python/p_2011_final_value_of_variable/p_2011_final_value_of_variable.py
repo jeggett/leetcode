@@ -1,8 +1,5 @@
-from typing import List
-
-
 class Solution:
-    def finalValueAfterOperations(self, operations: List[str]) -> int:
+    def finalValueAfterOperations(self, operations: list[str]) -> int:
         n = 0
         for operation in operations:
             if "+" in operation:

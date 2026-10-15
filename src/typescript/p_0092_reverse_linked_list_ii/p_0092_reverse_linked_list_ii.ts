@@ -4,60 +4,21 @@ export function reverseBetween(
     left: number,
     right: number,
 ): ListNode | null {
-    if (head === null || left === right) {
-        return head;
+    if (head === null || left === right) return head;
+    const sentinel: ListNode = { val: 0, next: head };
+    let before = sentinel;
+    for (let position = 1; position < left; position++) {
+        if (before.next === null) return head;
+        before = before.next;
     }
-    // make indexes start from 0, not from 1
-    const [leftIndex, rightIndex] = [left - 1, right - 1];
-
-    let leftPtr: ListNode | null = head;
-    let beforeLeftPtr: ListNode | null = null;
-    let rightPtr: ListNode | null = null;
-    let afterRightPtr: ListNode | null = null;
-
-    if (leftIndex > 0) {
-        beforeLeftPtr = head;
-        let count = 0;
-        while (count < leftIndex - 1 && beforeLeftPtr !== null) {
-            beforeLeftPtr = beforeLeftPtr.next;
-            count++;
-        }
+    const tail = before.next;
+    if (tail === null) return head;
+    // Move each following node to the front of the selected segment.
+    for (let position = left; position < right && tail.next !== null; position++) {
+        const node = tail.next;
+        tail.next = node.next;
+        node.next = before.next;
+        before.next = node;
     }
-
-    if (beforeLeftPtr !== null) {
-        leftPtr = beforeLeftPtr.next;
-    }
-
-    if (rightIndex > leftIndex) {
-        rightPtr = leftPtr;
-        let count = 0;
-        while (count < rightIndex - leftIndex && rightPtr !== null) {
-            rightPtr = rightPtr.next;
-            count++;
-        }
-    }
-
-    if (rightPtr !== null && rightPtr.next !== null) {
-        afterRightPtr = rightPtr.next;
-    }
-
-    let prev: ListNode | null = afterRightPtr;
-    let current: ListNode | null = null;
-    let follow: ListNode | null = leftPtr;
-    while (follow !== afterRightPtr) {
-        current = follow;
-        if (follow !== null) follow = follow.next;
-        if (current !== null) current.next = prev;
-        prev = current;
-    }
-
-    // connect ends of the reversed segment properly
-    if (beforeLeftPtr !== null) beforeLeftPtr.next = rightPtr;
-    if (leftPtr !== null && afterRightPtr !== null) leftPtr.next = afterRightPtr;
-
-    if (leftIndex === 0) {
-        head = rightPtr;
-    }
-
-    return head;
+    return sentinel.next;
 }

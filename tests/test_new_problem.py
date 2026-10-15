@@ -103,13 +103,20 @@ def test_creates_signature_aware_typescript_scaffold(tmp_path: Path) -> None:
     assert "numIdenticalPairs(...args)" in test_contents
 
 
-def test_generated_generic_typescript_signature_typechecks(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "signature",
+    [
+        "identity<T>(value: T): T",
+        'convert(value: { text: "a  b" }, fn: (s: string) => number): number',
+    ],
+)
+def test_generated_typescript_signature_typechecks(tmp_path: Path, signature: str) -> None:
     source, test, _ = create_problem(
         tmp_path,
         "ts",
         "1",
         ["Identity"],
-        signature="identity<T>(value: T): T",
+        signature=signature,
     )
 
     result = subprocess.run(
@@ -274,6 +281,8 @@ def test_extracts_signature_callable_name(language: str, signature: str, name: s
         ("ts", "method(): void => value"),
         ("ts", "method(): :"),
         ("ts", "method(): void)"),
+        ("ts", "solve(nums number[]): number"),
+        ("ts", "solve(value: number): number number"),
         ("py", "class(self) -> int"),
         ("py", "method(value: int) -> int"),
         ("py", "method(self)"),

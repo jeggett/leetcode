@@ -5,6 +5,7 @@ set -eu
 BIN_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
 REPOSITORY_ROOT=$(CDPATH= cd -- "$BIN_DIR/.." && pwd -P)
 CALLER_DIRECTORY=$(pwd -P)
+cd -- "$REPOSITORY_ROOT"
 
 # Help and diagnostics must remain available while mise.toml is untrusted or
 # the pinned tools have not been installed yet. Keep these branches before
@@ -37,14 +38,14 @@ for argument in "$@"; do
     fi
     case "$argument" in
         -h|--help)
-            exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+            exec_direct_python -m scripts.lc "$@"
             ;;
     esac
 done
 
 case "${1-}" in
     ""|help)
-        exec_direct_python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+        exec_direct_python -m scripts.lc "$@"
         ;;
     doctor|d)
         # Doctor is the bootstrap path: never let its diagnostics trigger mise's
@@ -53,11 +54,11 @@ case "${1-}" in
         if command -v mise >/dev/null 2>&1 && \
             MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- true >/dev/null 2>&1; then
             exec env MISE_AUTO_INSTALL=0 mise -C "$REPOSITORY_ROOT" exec -- \
-                python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+                python -m scripts.doctor "$REPOSITORY_ROOT"
         fi
-        exec_direct_python "$REPOSITORY_ROOT/scripts/doctor.py" "$REPOSITORY_ROOT"
+        exec_direct_python -m scripts.doctor "$REPOSITORY_ROOT"
         ;;
 esac
 
 LC_CALLER_CWD=$CALLER_DIRECTORY exec mise -C "$REPOSITORY_ROOT" exec -- \
-    python "$REPOSITORY_ROOT/scripts/lc.py" "$@"
+    python -m scripts.lc "$@"

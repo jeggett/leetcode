@@ -8,7 +8,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-
 IMPLEMENTATION_MARKER = "TODO: implement the solution"
 TEST_MARKER = "TODO: add examples and edge cases"
 COMPLEXITY_MARKER = "time: TODO, space: TODO"

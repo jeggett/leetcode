@@ -9,10 +9,8 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-try:
-    from scripts.problem_paths import ProblemPathError, require_test_path, resolve_problem_paths
-except ModuleNotFoundError:
-    from problem_paths import ProblemPathError, require_test_path, resolve_problem_paths
+from scripts.arguments import UsageError, parse, split_runner_args
+from scripts.problem_paths import ProblemPathError, require_test_path, resolve_problem_paths
 
 
 class TestOneError(ValueError):
@@ -34,33 +32,18 @@ class TestOneArguments:
 
 
 def parse_invocation(arguments: Sequence[str]) -> TestOneArguments:
-    """Parse focused-test options while preserving arguments for the test runner.
-
-    ``--watch`` is this wrapper's only option.  Everything after an explicit ``--``
-    (or the first non-wrapper option) is passed to Vitest or pytest unchanged.  The
-    explicit separator is optional for low-level package-script invocations.
-    """
-    if len(arguments) < 2:
-        raise TestOneError("usage: test_one <py|ts> <id> [--watch] [-- RUNNER_ARGS...]")
-    language, problem_id, *options = arguments
-    if language not in {"py", "ts"}:
-        raise TestOneError("language must be 'py' or 'ts'")
-
-    watch = False
-    runner_args: list[str] = []
-    forwarding = False
-    for index, option in enumerate(options):
-        if not forwarding and option == "--":
-            runner_args.extend(options[index + 1 :])
-            break
-        if not forwarding and option == "--watch":
-            if watch:
-                raise TestOneError("--watch may only be provided once")
-            watch = True
-            continue
-        forwarding = True
-        runner_args.append(option)
-    return TestOneArguments(language, problem_id, watch, tuple(runner_args))
+    """Keep low-level runner options after the ID, with an optional separator."""
+    values, runner_args = split_runner_args(arguments)
+    # Legacy pnpm test:one forwards everything after the first runner option.
+    boundary = next((i for i in range(2, len(values)) if values[i] != "--watch"), len(values))
+    runner_args = values[boundary:] + runner_args
+    try:
+        options = parse("test", values[:boundary])
+    except UsageError as error:
+        raise TestOneError(str(error)) from error
+    return TestOneArguments(
+        options.language, options.problem_id, bool(options.watch), tuple(runner_args)
+    )
 
 
 def focused_command(

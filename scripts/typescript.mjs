@@ -22,20 +22,23 @@ function isMember(node, object, property) {
     );
 }
 
-function typescriptSubmission(source) {
-    let ast;
+function parseTypeScript(source) {
     try {
-        ast = parse(source, {
+        return parse(source, {
             sourceType: "module",
             plugins: ["typescript"],
             createImportExpressions: true,
             allowUndeclaredExports: true,
             attachComment: false,
+            tokens: true,
         });
     } catch (error) {
         throw new Error(`invalid TypeScript syntax: ${error.message}`);
     }
+}
 
+function typescriptSubmission(source) {
+    const ast = parseTypeScript(source);
     for (const comment of ast.comments) {
         if (
             comment.type === "CommentLine" &&
@@ -112,8 +115,63 @@ function typescriptSubmission(source) {
     return source;
 }
 
+function typescriptSignature(source, extract) {
+    const prefix = "function ";
+    const code = extract ? source : `${prefix}${source} {}`;
+    const ast = parseTypeScript(code);
+    const fn = ast.program.body.find((node) => node.type === "FunctionDeclaration");
+    if (!fn?.id || !fn.returnType || fn.async || fn.generator) {
+        throw new Error("signature must describe an ordinary function with a return type");
+    }
+    if (
+        !extract &&
+        (ast.program.body.length !== 1 ||
+            ast.comments.length ||
+            fn.body.start !== prefix.length + source.length + 1)
+    ) {
+        throw new Error("invalid TypeScript function signature");
+    }
+    if (
+        ast.comments.some(
+            (comment) => comment.start >= fn.id.start && comment.start < fn.body.start,
+        )
+    ) {
+        throw new Error("signature comments are unsupported");
+    }
+    // Normalize whitespace between tokens without changing string literal types.
+    let signature = "";
+    let previous = fn.id.start;
+    for (const token of ast.tokens) {
+        if (token.start < fn.id.start || token.end > fn.body.start) continue;
+        signature += code.slice(previous, token.start).replace(/\s+/g, " ");
+        signature += code.slice(token.start, token.end);
+        previous = token.end;
+    }
+    if (extract) {
+        const names = new Set(
+            ast.tokens
+                .filter((token) => token.start >= fn.id.end && token.end <= fn.body.start)
+                .map((token) => token.value),
+        );
+        const required = ast.program.body.filter(
+            (node) => node !== fn && node.id && names.has(node.id.name),
+        );
+        if (required.length) {
+            throw new Error(
+                `signature needs omitted declaration(s): ${required.map((node) => node.id.name).join(", ")}`,
+            );
+        }
+    }
+    return JSON.stringify([signature.trim(), fn.id.name]);
+}
+
 try {
-    process.stdout.write(typescriptSubmission(readFileSync(0, "utf8")));
+    const source = readFileSync(0, "utf8");
+    const operation = process.argv[2];
+    if (operation === "submission") process.stdout.write(typescriptSubmission(source));
+    else if (operation === "signature" || operation === "extract-signature") {
+        process.stdout.write(typescriptSignature(source, operation === "extract-signature"));
+    } else throw new Error(`unknown TypeScript operation: ${operation}`);
 } catch (error) {
     console.error(error.message);
     process.exitCode = 1;

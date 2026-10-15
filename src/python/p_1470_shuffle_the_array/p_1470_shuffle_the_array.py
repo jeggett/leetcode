@@ -1,8 +1,5 @@
-from typing import List
-
-
 class Solution:
-    def shuffle(self, nums: List[int], n: int) -> List[int]:
+    def shuffle(self, nums: list[int], n: int) -> list[int]:
         if n < 2:
             return nums
 

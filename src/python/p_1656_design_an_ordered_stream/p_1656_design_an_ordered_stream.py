@@ -1,6 +1,3 @@
-from typing import List
-
-
 class OrderedStream:
     """time: O(N), space: O(1)"""
 
@@ -8,7 +5,7 @@ class OrderedStream:
         self.__arr = [None for _ in range(n)]
         self.__ptr = 0
 
-    def insert(self, idKey: int, value: str) -> List[str]:
+    def insert(self, idKey: int, value: str) -> list[str]:
         idKey -= 1
         self.__arr[idKey] = value
         if self.__arr[self.__ptr] is None:
