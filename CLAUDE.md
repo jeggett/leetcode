@@ -22,7 +22,9 @@ submission rendering. Reuse these boundaries when adding behavior.
 Install tools with `mise install`, JavaScript dependencies with
 `pnpm install --frozen-lockfile`, and Python dependencies with
 `uv sync --frozen`. Keep tool declarations in `mise.toml`, version files,
-and `package.json` consistent. `pnpm prepare` installs the Git hook.
+and `package.json` consistent. `.node-version` is the authoritative Node.js
+pin; `mise.toml` enables version files and pins pnpm, Python, and uv.
+`pnpm prepare` installs the Git hook.
 
 Use `lc` for interactive work:
 

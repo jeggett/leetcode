@@ -17,7 +17,9 @@ pnpm prepare
 lc doctor
 ```
 
-The version files, `mise.toml`, and `package.json` declare the toolchain.
+`.node-version` is the authoritative Node.js pin. `mise.toml` enables
+version files and pins pnpm, Python, and uv. Keep `.python-version` and
+`package.json` consistent with the toolchain.
 `pnpm-lock.yaml` and `uv.lock` lock dependencies. Mise adds `bin/` to `PATH`;
 `bin/lc` also works directly. `bin/setup --trust` automates installation.
 
