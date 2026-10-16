@@ -38,6 +38,8 @@ fi
 
 # Install independently and accept an already-correct Python before invoking mise's backend.
 mise -C "$REPOSITORY_ROOT" install node
+JUDGE_NODE_VERSION=$(sed -n '1p' "$REPOSITORY_ROOT/.judge-node-version")
+mise -C "$REPOSITORY_ROOT" install "node@$JUDGE_NODE_VERSION"
 mise -C "$REPOSITORY_ROOT" install npm:pnpm
 mise -C "$REPOSITORY_ROOT" install uv
 EXPECTED_PYTHON=$(sed -n '1p' "$REPOSITORY_ROOT/.python-version")

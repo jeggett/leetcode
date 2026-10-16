@@ -11,6 +11,7 @@ Keep the checkout in the Linux filesystem when using WSL. Install and activate
 ```sh
 mise trust
 mise install
+mise install "node@$(cat .judge-node-version)"
 pnpm install --frozen-lockfile
 uv sync --frozen
 pnpm prepare
@@ -26,6 +27,12 @@ version files and pins pnpm, Python, and uv. Keep `.python-version` and
 TypeScript uses Vitest, Biome, and the ES2024 target. Python uses pytest and
 Ruff. The pre-commit hook and GitHub Actions run the complete `ready` gate.
 
+The judge gate separately checks rendered TypeScript submissions using
+TypeScript 5.7.3 and runs their tests on Node.js 22.14.0, matching LeetCode's
+[documented environment](https://support.leetcode.com/hc/en-us/articles/360011833974-What-are-the-environments-for-the-programming-languages).
+`.judge-node-version` pins that extra runtime; development keeps using
+`.node-version`. `pnpm judge:check` runs this gate on its own.
+
 For VS Code, accept the workspace extension recommendations and select
 `.venv` as the Python interpreter. Workspace tasks cover scaffolding, tests,
 watch mode, formatting, and validation.
@@ -38,14 +45,17 @@ versions, the frozen install commands to synchronize dependencies, and
 
 ```sh
 lc https://leetcode.com/problems/search-insert-position/
-# Implement the solution and replace the skipped scaffold tests.
+# Implement the solution, review example tests, and add edge cases.
 lc test 35
 lc ready
 lc copy 35
 ```
 
 URL scaffolding fetches the official signature and writes the solution and
-test files. It refuses existing problem IDs. Use `lc py URL` for Python.
+test files. Clear JSON examples become runnable assertions. Mutation, nodes,
+special judging, or ambiguous examples keep a skipped template to edit.
+Review the tests and add edge cases before `lc ready`.
+It refuses existing problem IDs. Use `lc py URL` for Python.
 Scaffolding never changes Git branches or requires a clean worktree; use
 ordinary Git commands when you want a separate problem branch.
 
@@ -74,7 +84,7 @@ Manual scaffolding only writes files. It accepts `--url URL` and
 | `lc copy [LANG] [ID]` | Check, print, and copy the submission |
 | `lc incomplete` | Find generated scaffold markers |
 | `lc ready` | Require complete scaffolds and run all checks |
-| `lc check` | Run formatting checks, lint, types, and tests |
+| `lc check` | Run format, lint, types, tests, and judge checks |
 | `lc format [LANG]` | Apply formatting |
 | `lc format [LANG] --check` | Check formatting without edits |
 | `lc lint [LANG]` | Run linters |
@@ -110,7 +120,12 @@ Workflow implementation is in `scripts/`, with tests in `tests/`.
 Keep solutions compatible with the judge's signature and input constraints.
 Use named TypeScript exports and explicit `.js` extensions in test imports.
 Judge types live in `src/typescript/judge-types.d.ts`; reusable test helpers
-live in `src/typescript/data_structures/`.
+live in `src/typescript/data_structures/` and `src/python/data_structures/`.
+TypeScript's `tree.ts` provides `TreeNode`, `treeFromLevelOrder`, and
+`treeToLevelOrder`; the existing `LinkedList` API remains available.
+Python's `helpers.py` converts lists and level-order trees to and from judge
+node shapes. Import these helpers in tests; submitted solutions use the
+judge-provided nodes.
 
 Test supplied examples and meaningful boundaries, including mutation behavior.
 Add failed judge inputs as regression tests. Document time and auxiliary-space
