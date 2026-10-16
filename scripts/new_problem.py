@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Sequence
 
 from scripts.arguments import UsageError, parse
+from scripts.examples import Example, render_example_tests
 from scripts.problem_paths import (
     ProblemPathError,
     ProblemPaths,
@@ -263,6 +264,8 @@ def create_problem(
     title_parts: Sequence[str],
     problem_url: str | None = None,
     signature: str | None = None,
+    *,
+    examples: tuple[Example, ...] = (),
 ) -> tuple[Path, Path, str]:
     """Create source and test templates, returning their paths and branch suggestion."""
     if language not in {"py", "ts"}:
@@ -275,6 +278,8 @@ def create_problem(
     function_name: str | None = None
     if signature is not None:
         signature, function_name = validate_signature(language, signature)
+    if examples and function_name is None:
+        raise ScaffoldError("example tests require a signature")
     directory, source_path, test_path = build_paths(root, language, problem_id, slug)
     existing_problems = matching_problem_directories(directory.parent, problem_id)
     if existing_problems:
@@ -292,6 +297,9 @@ def create_problem(
             problem_id, title, function_name, problem_url, signature
         )
         test = render_typescript_test(stem, function_name, signature is not None)
+
+    if examples:
+        test = render_example_tests(language, stem, function_name, examples)
 
     directory.mkdir(parents=True)
     try:

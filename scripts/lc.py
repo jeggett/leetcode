@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from scripts.arguments import LANGUAGES, UsageError, parse, split_runner_args
+from scripts.examples import Example, extract_examples
 from scripts.new_problem import (
     ScaffoldError,
     create_problem,
@@ -40,6 +41,9 @@ query questionData($titleSlug: String!) {
     title
     titleSlug
     isPaidOnly
+    content
+    exampleTestcases
+    metaData
     codeSnippets {
       langSlug
       code
@@ -68,7 +72,7 @@ Solve:
 
 Quality:
   lc ready                       require a complete, fully passing solution
-  lc check                       run format checks, lint, types, and tests
+  lc check                       run format, lint, types, tests, and judge checks
   lc format [ts|py] [--check]    apply formatting, or only check it
   lc lint [ts|py]                run linters
   lc typecheck                   type-check TypeScript
@@ -103,6 +107,8 @@ class ProblemMetadata:
     title_slug: str
     canonical_url: str
     signature: str
+    examples: tuple[Example, ...] = ()
+    example_note: str | None = "Official examples or judging metadata are unavailable."
 
 
 @dataclass(frozen=True)
@@ -377,12 +383,15 @@ def fetch_problem_metadata(
         slugify(title)
     except (ProblemPathError, ScaffoldError) as error:
         raise LeetError("LeetCode returned invalid problem metadata") from error
+    examples, example_note = extract_examples(question)
     return ProblemMetadata(
         problem_id=problem_id,
         title=title.strip(),
         title_slug=requested_slug,
         canonical_url=canonical_url,
         signature=signature,
+        examples=examples,
+        example_note=example_note,
     )
 
 
@@ -403,6 +412,7 @@ def scaffold_from_url(
             [metadata.title],
             metadata.canonical_url,
             metadata.signature,
+            examples=metadata.examples,
         )
     except (ProblemPathError, ScaffoldError, OSError) as error:
         raise LeetError(f"could not create scaffold: {error}") from error
@@ -679,6 +689,10 @@ def _print_scaffold_result(result: ScaffoldResult, root: Path, language: str) ->
     print(f"Suggested branch: {result.branch}")
     print(f"Created: {result.source_path.relative_to(root)}")
     print(f"Created: {result.test_path.relative_to(root)}")
+    if result.metadata.examples:
+        print(f"Added {len(result.metadata.examples)} official example tests; add edge cases.")
+    elif result.metadata.example_note:
+        print(f"Test template: {result.metadata.example_note}")
     print("Next steps:")
     print(f"  lc test {language} {result.metadata.problem_id}")
     if language == "ts":

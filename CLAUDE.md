@@ -8,8 +8,9 @@ is self-contained; no external instruction file is required.
 Solutions live in `src/typescript/` and `src/python/`, grouped by
 `p_####_<slug>/`. TypeScript uses `<stem>.ts` and `<stem>.test.ts`; Python
 uses `<stem>.py` and `test_<stem>.py`. Shared TypeScript test helpers belong
-in `src/typescript/data_structures/`; judge types belong in
-`src/typescript/judge-types.d.ts`.
+in `src/typescript/data_structures/`, and Python helpers in
+`src/python/data_structures/`; judge types belong in
+`src/typescript/judge-types.d.ts`. Node conversion helpers are for tests.
 
 Workflow commands live in `scripts/`, with tests in `tests/`. Run Python
 commands as modules from the repository root: `python -m scripts.NAME`.
@@ -24,12 +25,15 @@ Install tools with `mise install`, JavaScript dependencies with
 `uv sync --frozen`. Keep tool declarations in `mise.toml`, version files,
 and `package.json` consistent. `.node-version` is the authoritative Node.js
 pin; `mise.toml` enables version files and pins pnpm, Python, and uv.
+Install the additional judge runtime with
+`mise install "node@$(cat .judge-node-version)"`; `bin/setup` includes this.
 `pnpm prepare` installs the Git hook.
 
 Use `lc` for interactive work:
 
 - `lc URL` fetches metadata and scaffolds TypeScript. Use `lc py URL`
-  for Python. Scaffolding never changes Git state.
+  for Python. Clear JSON examples become tests; uncertain judging rules
+  keep an editable skipped template. Scaffolding never changes Git state.
 - `lc new [ts|py] ID TITLE...` scaffolds files without Git or network access.
   It accepts optional `--url` and `--signature` metadata.
 - `lc test` runs the detected problem or, without context, all tests.
@@ -42,7 +46,9 @@ Use `lc` for interactive work:
   frozen installs for versions; `pnpm prepare` installs hooks.
 - `lc lint`, `lc typecheck`, and `lc format --check` run individual checks.
   `lc format` applies formatting.
-- `lc check` runs formatting checks, lint, TypeScript types, and all tests.
+- `lc check` runs formatting checks, lint, TypeScript types, all tests,
+  and `pnpm judge:check`. The judge gate typechecks rendered submissions
+  with TypeScript 5.7.3 and runs TypeScript tests with Node.js 22.14.0.
 - `lc ready` rejects incomplete scaffolds before running `lc check`.
   Run it before submitting or committing.
 

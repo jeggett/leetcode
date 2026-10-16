@@ -6,7 +6,14 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 COMMANDS = ("mise", "node", "pnpm", "python", "uv", "git")
-NODE_PACKAGES = ("@babel/parser", "@biomejs/biome", "typescript", "vitest", "lefthook")
+NODE_PACKAGES = (
+    "@babel/parser",
+    "@biomejs/biome",
+    "typescript",
+    "typescript-judge",
+    "vitest",
+    "lefthook",
+)
 
 
 def collect_checks(

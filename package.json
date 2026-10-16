@@ -21,8 +21,9 @@
     "format:check": "pnpm run format:check:ts && pnpm run format:check:py",
     "format:check:ts": "biome format src/typescript scripts/*.mjs vitest.config.ts",
     "format:check:py": "uv run ruff format --check .",
-    "typecheck": "tsc --noEmit",
-    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test",
+    "typecheck": "node node_modules/typescript/bin/tsc --noEmit",
+    "judge:check": "uv run python -m scripts.check_judge",
+    "check": "pnpm run format:check && pnpm run lint && pnpm run typecheck && pnpm run test && pnpm run judge:check",
     "ready": "pnpm run incomplete && pnpm run check",
     "ready:all": "pnpm run ready",
     "doctor": "python -m scripts.doctor",
@@ -50,6 +51,7 @@
     "@biomejs/biome": "2.5.7",
     "lefthook": "2.1.10",
     "typescript": "7.0.2",
+    "typescript-judge": "npm:typescript@5.7.3",
     "vitest": "4.1.10"
   },
   "packageManager": "pnpm@11.20.0"
