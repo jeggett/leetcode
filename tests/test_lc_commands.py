@@ -394,6 +394,36 @@ def test_main_propagates_child_status_and_help_never_runs_a_child(
     assert calls == [(("pnpm", "run", "ready"), root)]
 
 
+@pytest.mark.parametrize(
+    ("arguments", "usage"),
+    [
+        (["test", "--help"], "usage: lc test"),
+        (["t", "--help"], "usage: lc test"),
+        (["watch", "--help"], "usage: lc watch"),
+        (["new", "--help"], "usage: lc new"),
+        (["submit", "--help"], "usage: lc submit"),
+        (["copy", "--help"], "usage: lc copy"),
+        (["help", "test"], "usage: lc test"),
+    ],
+)
+def test_command_help_gives_examples_without_running_commands(
+    arguments: list[str],
+    usage: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def unexpected(*_arguments):
+        pytest.fail("help should not run a project command")
+
+    monkeypatch.setattr(lc, "run_interactive_command", unexpected)
+    assert lc.main(arguments) == 0
+    output = capsys.readouterr().out
+    assert output.startswith(usage)
+    assert "Examples:" in output
+    if usage in {"usage: lc test", "usage: lc watch"}:
+        assert "RUNNER_ARGS" in output
+
+
 def test_focused_tests_forward_runner_options_and_help(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

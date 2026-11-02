@@ -77,13 +77,77 @@ Quality:
   lc lint [ts|py]                run linters
   lc typecheck                   type-check TypeScript
   lc incomplete                  find untouched scaffold markers
-  lc doctor                      find missing setup prerequisites
+  lc doctor                      check setup prerequisites and versions
 
 Submit options: --copy, --copy-only, --no-check.
 Short aliases: t=test, w=watch, s=submit, r=ready, c=check, fmt=format.
 Languages default to TypeScript. Current problem detection uses the caller's problem
-directory first, then a matching feat/p-####-* branch. Use COMMAND --help for this help.
+directory first, then a matching feat/p-####-* branch. Use COMMAND --help for details.
 """
+COMMAND_HELP = {
+    "test": """\
+usage: lc test [ts|py] [ID|PATH|all] [--watch] [-- RUNNER_ARGS...]
+
+Run the current problem's tests, or all tests when no problem is detected.
+An explicit ID defaults to TypeScript; a source or test path infers its language.
+Paths are relative to the calling directory. Use `all` for all tests or select a
+language to run its suite. Pass runner options after `--`.
+
+Examples:
+  lc test 268
+  lc test py 1512 -- -q
+  lc test ./p_0268_missing_number.ts -- -t missing
+  lc test ts --watch
+""",
+    "watch": """\
+usage: lc watch [ID|PATH] [-- RUNNER_ARGS...]
+
+Watch TypeScript tests for a problem, path, or the current problem. If no
+problem is detected, watch the TypeScript suite. Pass runner options after `--`.
+
+Examples:
+  lc watch 268
+  lc watch ./p_0268_missing_number.ts -- -t missing
+""",
+    "new": """\
+usage: lc new [ts|py] ID TITLE... [--url URL] [--signature SIGNATURE]
+       lc new [ts|py] URL
+
+Create a problem from its ID and title without network access, or fetch the
+official signature and examples from a LeetCode problem URL. TypeScript is the
+default language. Existing problem IDs are not overwritten.
+
+Examples:
+  lc new py 1512 Number of Good Pairs
+  lc new ts 1512 Number of Good Pairs --signature 'solve(nums: number[]): number'
+  lc new py https://leetcode.com/problems/search-insert-position/
+""",
+    "submit": """\
+usage: lc submit [ts|py] [ID] [--copy | --copy-only] [--no-check]
+
+Run focused tests and judge compatibility checks, then print the submission.
+Without an ID, use the problem from the current directory or branch. An
+explicit ID defaults to TypeScript.
+--copy also copies the output; --copy-only prints a confirmation instead.
+--no-check skips both the focused tests and judge compatibility checks.
+
+Examples:
+  lc submit 268
+  lc submit py 1512 --copy-only
+""",
+    "copy": """\
+usage: lc copy [ts|py] [ID] [--copy-only] [--no-check]
+
+Run focused tests and judge compatibility checks, then print and copy the
+submission. Without an ID, use the current directory or branch. An explicit
+ID defaults to TypeScript. --copy-only prints a confirmation instead of source;
+--no-check skips both the focused tests and judge compatibility checks.
+
+Examples:
+  lc copy 268
+  lc copy py 1512 --copy-only
+""",
+}
 PROBLEM_PATH = re.compile(r"^/problems/(?P<slug>[a-z0-9]+(?:-[a-z0-9]+)*)(?:/description)?/?$")
 PROBLEM_DIRECTORY = re.compile(r"^p_(?P<problem_id>[0-9]+)_.+$")
 PROBLEM_BRANCH = re.compile(r"^feat/p-(?P<problem_id>[0-9]{4,})-[a-z0-9]+(?:-[a-z0-9]+)*$")
@@ -704,11 +768,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Run the unified local LeetCode command."""
     arguments = list(sys.argv[1:] if argv is None else argv)
     if not arguments or arguments[0] in {"-h", "--help", "help"}:
-        print(HELP)
+        command = (
+            arguments[1] if arguments and arguments[0] == "help" and len(arguments) > 1 else ""
+        )
+        print(COMMAND_HELP.get(COMMAND_ALIASES.get(command, command), HELP))
         return 0
     wrapper_arguments = arguments[: arguments.index("--")] if "--" in arguments else arguments
     if any(argument in {"-h", "--help"} for argument in wrapper_arguments[1:]):
-        print(HELP)
+        command = COMMAND_ALIASES.get(arguments[0], arguments[0])
+        print(COMMAND_HELP.get(command, HELP))
         return 0
     root = Path(__file__).resolve().parents[1]
     caller_cwd = Path(os.environ.get("LC_CALLER_CWD", root))

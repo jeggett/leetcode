@@ -11,7 +11,12 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts.problem_paths import ProblemPathError, language_directory, resolve_problem_paths
+from scripts.problem_paths import (
+    ProblemPathError,
+    language_directory,
+    require_test_path,
+    resolve_problem_paths,
+)
 from scripts.submission import SubmissionError, read_submission
 
 JUDGE_TYPESCRIPT = "5.7.3"
@@ -51,24 +56,32 @@ def judge_node(root: Path, *, run: Runner = subprocess.run) -> Path:
     return node
 
 
-def render_submissions(root: Path, destination: Path) -> list[Path]:
-    """Use the normal renderer and path resolver for each problem."""
-    problem_ids = set()
-    for directory in sorted(language_directory(root, "ts").glob("p_*")):
-        match = re.fullmatch(r"p_(\d+)_.+", directory.name)
-        if directory.is_dir() and match:
-            problem_ids.add(match.group(1))
+def render_submissions(root: Path, destination: Path, problem_id: str | None = None) -> list[Path]:
+    """Use the normal renderer for one problem or all problems."""
+    if problem_id is None:
+        problem_ids = set()
+        for directory in sorted(language_directory(root, "ts").glob("p_*")):
+            match = re.fullmatch(r"p_(\d+)_.+", directory.name)
+            if directory.is_dir() and match:
+                problem_ids.add(match.group(1))
+        selected_ids = sorted(problem_ids, key=int)
+    else:
+        selected_ids = [problem_id]
     files = []
-    for problem_id in sorted(problem_ids, key=int):
-        paths = resolve_problem_paths(root, "ts", problem_id)
+    for selected_id in selected_ids:
+        paths = resolve_problem_paths(root, "ts", selected_id)
         output = destination / f"{paths.stem}.ts"
-        output.write_text(read_submission(root, "ts", problem_id), encoding="utf-8")
+        output.write_text(read_submission(root, "ts", selected_id), encoding="utf-8")
         files.append(output)
     return files
 
 
-def check_judge(root: Path, *, run: Runner = subprocess.run) -> int:
+def check_judge(root: Path, problem_id: str | None = None, *, run: Runner = subprocess.run) -> int:
     """Typecheck isolated real submissions before running tests with judge Node."""
+    test_path = None
+    if problem_id is not None:
+        paths = resolve_problem_paths(root, "ts", problem_id)
+        test_path = str(require_test_path(paths).relative_to(root))
     node = judge_node(root, run=run)
     compiler = root / "node_modules/typescript-judge/bin/tsc"
     manifest = root / "node_modules/typescript-judge/package.json"
@@ -93,7 +106,7 @@ def check_judge(root: Path, *, run: Runner = subprocess.run) -> int:
         )
     with TemporaryDirectory(prefix="leetcode-judge-") as temporary:
         destination = Path(temporary)
-        files = render_submissions(root, destination)
+        files = render_submissions(root, destination, problem_id)
         config = destination / "tsconfig.json"
         config.write_text(
             json.dumps(
@@ -117,17 +130,20 @@ def check_judge(root: Path, *, run: Runner = subprocess.run) -> int:
         if result.returncode:
             return result.returncode
     print("Judge Node: running TypeScript tests", flush=True)
-    return run([str(node), str(vitest), "run"], cwd=root, check=False).returncode
+    command = [str(node), str(vitest), "run"]
+    if test_path is not None:
+        command.append(test_path)
+    return run(command, cwd=root, check=False).returncode
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the compatibility gate without installing tools or changing sources."""
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if arguments:
-        print("usage: check_judge.py", file=sys.stderr)
+    if len(arguments) > 1:
+        print("usage: check_judge.py [ID]", file=sys.stderr)
         return 2
     try:
-        return check_judge(Path(__file__).resolve().parents[1])
+        return check_judge(Path(__file__).resolve().parents[1], arguments[0] if arguments else None)
     except (JudgeCheckError, ProblemPathError, SubmissionError, OSError) as error:
         print(f"error: {error}", file=sys.stderr)
         return 1
