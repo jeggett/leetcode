@@ -1,7 +1,7 @@
 [tools]
-"npm:pnpm" = "11.20.0"
-python = "3.14.7"
-uv = "0.12.2"
+pnpm = "12.16.1"
+python = "3.15.2"
+uv = "0.13.6"
 
 [settings]
 idiomatic_version_file_enable_tools = ["node", "pnpm", "python"]

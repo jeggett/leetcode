@@ -1,3 +1,4 @@
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -343,12 +344,110 @@ def test_submission_preflight_requires_complete_scaffold_and_passing_focused_tes
             ["pnpm", "run", "test:py", "src/python/p_0001_two_sum/test_p_0001_two_sum.py"],
             tmp_path,
             False,
-        )
+        ),
+        (
+            [
+                "uv",
+                "run",
+                "--isolated",
+                "--frozen",
+                "--python",
+                "3.14",
+                "pytest",
+                "src/python/p_0001_two_sum/test_p_0001_two_sum.py",
+            ],
+            tmp_path,
+            False,
+        ),
     ]
 
     source.write_text("# TODO: implement the solution\n", encoding="utf-8")
     with pytest.raises(SubmissionError, match="submission is incomplete"):
         preflight_submission(tmp_path, "py", "1", run=passing_run)
+
+
+@pytest.mark.parametrize("failed_check", ["focused", "judge"])
+def test_submission_preflight_reports_failed_checks(tmp_path: Path, failed_check: str) -> None:
+    source = make_source(tmp_path, "py", "class Solution:\n    pass\n")
+    source.with_name("test_p_0001_two_sum.py").write_text("def test_solution():\n    pass\n")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        failed = len(calls) == (1 if failed_check == "focused" else 2)
+        return subprocess.CompletedProcess(command, int(failed), "failure details", "")
+
+    with pytest.raises(SubmissionError, match=f"{failed_check}.*failure details"):
+        preflight_submission(tmp_path, "py", "1", run=run)
+    assert len(calls) == (1 if failed_check == "focused" else 2)
+
+
+def test_submission_preflight_checks_only_selected_problem_on_judge(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    repository = Path(__file__).resolve().parents[1]
+    if not shutil.which("mise"):
+        pytest.skip("mise is required to find judge Node")
+    located = subprocess.run(
+        ["mise", "where", "node@22.14.0"], capture_output=True, text=True, check=False
+    )
+    if located.returncode:
+        pytest.skip("judge Node 22.14.0 is not installed")
+
+    shutil.copytree(
+        repository / "scripts", tmp_path / "scripts", ignore=shutil.ignore_patterns("__pycache__")
+    )
+    (tmp_path / "node_modules").symlink_to(repository / "node_modules", target_is_directory=True)
+    (tmp_path / ".judge-node-version").write_text("22.14.0\n", encoding="utf-8")
+    (tmp_path / "package.json").write_text('{"private": true, "type": "module"}\n')
+    shutil.copyfile(repository / "vitest.config.ts", tmp_path / "vitest.config.ts")
+    source = make_source(tmp_path, "ts", 'export function solve(): string { return "ok"; }\n')
+    source.with_name("p_0001_two_sum.test.ts").write_text(
+        'import { solve } from "./p_0001_two_sum.js";\n'
+        'test("returns a string", () => expect(typeof solve()).toBe("string"));\n'
+    )
+    (source.parent.parent / "judge-types.d.ts").write_text("")
+    unrelated = source.parent.parent / "p_0002_unrelated"
+    unrelated.mkdir()
+    (unrelated / "p_0002_unrelated.ts").write_text(
+        "export function broken(): number { return 'not a number'; }\n"
+    )
+    (unrelated / "p_0002_unrelated.test.ts").write_text(
+        'test("unrelated failure", () => { throw new Error("not selected"); });\n'
+    )
+
+    def run(command, **kwargs):
+        # Use Vitest directly in the temporary project, whose dependencies are linked
+        # to the installed workspace instead of installed again by pnpm.
+        if command[:3] == ["pnpm", "run", "test:ts"]:
+            command = [
+                "node",
+                str(repository / "node_modules/vitest/vitest.mjs"),
+                "run",
+                command[-1],
+            ]
+        return subprocess.run(command, **kwargs)
+
+    monkeypatch.setattr(submission, "__file__", str(tmp_path / "scripts" / "submission.py"))
+    monkeypatch.setattr(
+        submission,
+        "preflight_submission",
+        lambda root, language, problem_id: preflight_submission(
+            root, language, problem_id, run=run
+        ),
+    )
+
+    # An unrelated invalid solution or test must not prevent this submission.
+    assert submission.main(["ts", "1"]) == 0
+    assert capsys.readouterr().out == ' function solve(): string { return "ok"; }\n'
+
+    # RegExp.escape is supported by development Node, but absent from the judge.
+    source.write_text('export function solve(): string { return RegExp.escape("a.b"); }\n')
+    assert submission.main(["ts", "1"]) == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "judge compatibility check failed" in output.err
+    assert "Property 'escape' does not exist" in output.err
 
 
 def test_copy_only_prints_confirmation_without_dumping_source(

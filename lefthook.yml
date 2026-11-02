@@ -1,4 +1,15 @@
 pre-commit:
+  parallel: true
   commands:
-    staged-ready:
-      run: mise exec -- pnpm ready
+    typescript-format:
+      glob: "*.{ts,mjs}"
+      run: mise exec -- pnpm exec biome format {staged_files}
+    typescript-lint:
+      glob: "*.{ts,mjs}"
+      run: mise exec -- pnpm exec biome lint {staged_files}
+    python-format:
+      glob: "*.py"
+      run: mise exec -- uv run ruff format --check {staged_files}
+    python-lint:
+      glob: "*.py"
+      run: mise exec -- uv run ruff check {staged_files}

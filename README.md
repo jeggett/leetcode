@@ -25,21 +25,29 @@ version files and pins pnpm, Python, and uv. Keep `.python-version` and
 `bin/lc` also works directly. `bin/setup --trust` automates installation.
 
 TypeScript uses Vitest, Biome, and the ES2024 target. Python uses pytest and
-Ruff. The pre-commit hook and GitHub Actions run the complete `ready` gate.
+Ruff. Pre-commit checks formatting and lint on staged files. GitHub Actions
+runs the complete `ready` gate, including tests and judge compatibility.
 
 The judge gate separately checks rendered TypeScript submissions using
 TypeScript 5.7.3 and runs their tests on Node.js 22.14.0, matching LeetCode's
 [documented environment](https://support.leetcode.com/hc/en-us/articles/360011833974-What-are-the-environments-for-the-programming-languages).
 `.judge-node-version` pins that extra runtime; development keeps using
-`.node-version`. `pnpm judge:check` runs this gate on its own.
+`.node-version`. Python solutions are also tested with Python 3.14 in an
+isolated uv environment; uv downloads that interpreter if needed.
+`pnpm judge:check` runs both compatibility gates; `pnpm judge:py` runs Python.
 
 For VS Code, accept the workspace extension recommendations and select
 `.venv` as the Python interpreter. Workspace tasks cover scaffolding, tests,
 watch mode, formatting, and validation.
 
-Doctor only checks setup prerequisites. Use `mise current` to inspect tool
-versions, the frozen install commands to synchronize dependencies, and
-`pnpm prepare` to reinstall hooks. `lc ready` validates the actual workspace.
+Doctor reports expected and installed tool/dependency versions, including
+the judge Node runtime, and suggests commands to repair missing or mismatched
+tools. It never installs tools. `lc ready` validates the actual workspace.
+
+Dependabot opens weekly package and GitHub Actions updates. Runtime and
+package-manager pins are updated together manually; see
+[CLAUDE.md](CLAUDE.md) for the maintenance commands. Development uses current
+stable tools while judge compatibility stays pinned to LeetCode.
 
 ## Daily workflow
 
@@ -89,7 +97,7 @@ Manual scaffolding only writes files. It accepts `--url URL` and
 | `lc format [LANG] --check` | Check formatting without edits |
 | `lc lint [LANG]` | Run linters |
 | `lc typecheck` | Check TypeScript types |
-| `lc doctor` | Find missing tools and local dependency files |
+| `lc doctor` | Find missing tools and mismatched dependency versions |
 
 Tests accept a solution or test file path, relative to the calling directory.
 Use `--` to pass runner options: `lc test py 1512 -- -q` or
@@ -101,10 +109,15 @@ detected, `lc test` runs all tests and `lc submit` requires an ID. Explicit IDs
 default to TypeScript; paths infer their language.
 
 Submission checks require complete source and tests and a passing focused
-suite. `--no-check` skips that preflight. `--copy` also copies the output;
+suite, followed by judge compatibility checks for that problem. Other
+unfinished problems do not block submission. `--no-check` skips that
+preflight. `--copy` also copies the output;
 `--copy-only` copies it and prints a confirmation instead of source. The
 TypeScript renderer removes supported exports and rejects module dependencies.
 Python source is emitted unchanged.
+
+Use `lc test --help`, `lc new --help`, or `lc submit --help` for examples
+and command options.
 
 Aliases: `t=test`, `w=watch`, `s=submission=submit`, `r=ready`, `c=check`,
 `f=fmt=format`, `fc=format-check`, `n=add=a=new`, `d=doctor`,

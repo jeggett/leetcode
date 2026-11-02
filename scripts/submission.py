@@ -74,7 +74,7 @@ def preflight_submission(
     *,
     run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
 ) -> None:
-    """Reject incomplete scaffolds and require the focused problem test to pass."""
+    """Require a complete scaffold and passing tests on development and judge runtimes."""
     paths = resolve_problem_paths(root, language, problem_id)
     source_path = require_source_path(paths)
     test_path = require_test_path(paths)
@@ -87,14 +87,29 @@ def preflight_submission(
         details = ", ".join(f"{path.name}: {marker}" for path, marker in incomplete)
         raise SubmissionError(f"submission is incomplete: {details}")
 
-    command = focused_command(root, language, problem_id)
-    completed = run(command, cwd=root, check=False, capture_output=True, text=True)
-    if completed.returncode != 0:
-        details = ((completed.stdout or "") + (completed.stderr or "")).strip()
-        suffix = f": {details}" if details else ""
-        raise SubmissionError(
-            f"focused test failed with exit status {completed.returncode}{suffix}"
-        )
+    if language == "ts":
+        judge_command = [sys.executable, "-m", "scripts.check_judge", problem_id]
+    else:
+        judge_command = [
+            "uv",
+            "run",
+            "--isolated",
+            "--frozen",
+            "--python",
+            "3.14",
+            "pytest",
+            str(test_path.relative_to(root)),
+        ]
+    checks = (
+        ("focused test", focused_command(root, language, problem_id)),
+        ("judge compatibility check", judge_command),
+    )
+    for label, command in checks:
+        completed = run(command, cwd=root, check=False, capture_output=True, text=True)
+        if completed.returncode:
+            details = ((completed.stdout or "") + (completed.stderr or "")).strip()
+            suffix = f": {details}" if details else ""
+            raise SubmissionError(f"{label} failed with exit status {completed.returncode}{suffix}")
 
 
 def clipboard_commands(

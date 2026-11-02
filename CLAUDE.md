@@ -41,16 +41,28 @@ Use `lc` for interactive work:
   Runner options follow `--`. `lc watch` watches TypeScript tests.
 - `lc submit [ts|py] [ID]` checks and renders a submission. `lc copy`
   also copies it. `--copy-only` suppresses source output; `--no-check`
-  explicitly skips the focused preflight.
-- `lc doctor` checks command and local dependency presence. Use mise and
-  frozen installs for versions; `pnpm prepare` installs hooks.
+  explicitly skips the focused tests and judge compatibility checks.
+- `lc doctor` reports installed and expected tool/dependency versions,
+  including the judge Node runtime, with commands to repair mismatches.
+  `pnpm prepare` installs hooks.
 - `lc lint`, `lc typecheck`, and `lc format --check` run individual checks.
   `lc format` applies formatting.
 - `lc check` runs formatting checks, lint, TypeScript types, all tests,
   and `pnpm judge:check`. The judge gate typechecks rendered submissions
-  with TypeScript 5.7.3 and runs TypeScript tests with Node.js 22.14.0.
+  with TypeScript 5.7.3, runs TypeScript tests with Node.js 22.14.0,
+  and runs Python solutions' tests with Python 3.14 in an isolated uv env.
 - `lc ready` rejects incomplete scaffolds before running `lc check`.
-  Run it before submitting or committing.
+  Run it before opening a PR; CI runs the same full gate. Pre-commit checks
+  formatting and lint on staged files so unrelated scaffolds do not block
+  a focused commit.
+
+Keep development tools on their latest stable releases. Dependabot opens
+weekly updates for JavaScript/Python packages and GitHub Actions. Update
+runtime and package-manager pins together manually: `mise.toml`, version
+files, and `package.json` must agree. Refresh lockfiles with `pnpm update`
+and `uv lock --upgrade`, then run `lc doctor` and `lc ready`. Preserve the
+judge compiler/runtime pins and Python 3.14 compatibility when upgrading.
+Update Biome's schema URL when updating its package.
 
 The pnpm scripts remain stable low-level interfaces for automation. Git
 commit, push, and pull remain ordinary Git commands. See README.md for setup

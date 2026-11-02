@@ -1,0 +1,35 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    ignore:
+      # The judge compiler follows LeetCode, not npm's latest release.
+      - dependency-name: typescript-judge
+      # Runtime/package-manager updates must also change the mise pins.
+      - dependency-name: node
+      - dependency-name: pnpm
+    groups:
+      javascript:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        patterns: ["*"]
+    commit-message:
+      prefix: chore
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
